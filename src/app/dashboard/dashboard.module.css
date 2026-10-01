@@ -1,0 +1,375 @@
+.shell {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+  padding: 1.5rem clamp(1rem, 4vw, 2.5rem) 3rem;
+}
+
+.header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  flex-wrap: wrap;
+  padding-bottom: 1rem;
+  border-bottom: 1px solid color-mix(in srgb, currentColor 18%, transparent);
+}
+
+.title {
+  font-size: 1.25rem;
+  font-weight: 700;
+}
+
+.subtitle {
+  color: color-mix(in srgb, currentColor 60%, transparent);
+  font-size: 0.85rem;
+}
+
+.headerActions {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+/* ---------------------------------------------------------------- login */
+
+.loginShell {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1.5rem;
+}
+
+.loginCard {
+  width: 100%;
+  max-width: 24rem;
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  padding: 1.75rem;
+  border: 1px solid color-mix(in srgb, currentColor 18%, transparent);
+  border-radius: 0.75rem;
+  background: color-mix(in srgb, currentColor 4%, transparent);
+}
+
+.loginTitle {
+  font-size: 1.15rem;
+  font-weight: 700;
+}
+
+.hint {
+  color: color-mix(in srgb, currentColor 60%, transparent);
+  font-size: 0.8rem;
+  line-height: 1.6;
+}
+
+.error {
+  padding: 0.6rem 0.75rem;
+  border-radius: 0.5rem;
+  border: 1px solid color-mix(in srgb, currentColor 35%, transparent);
+  background: color-mix(in srgb, currentColor 8%, transparent);
+  font-size: 0.85rem;
+}
+
+/* --------------------------------------------------------------- filters */
+
+.filters {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(11rem, 1fr));
+  gap: 0.75rem 1rem;
+  align-items: end;
+  padding: 1rem;
+  border: 1px solid color-mix(in srgb, currentColor 18%, transparent);
+  border-radius: 0.75rem;
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  font-size: 0.8rem;
+}
+
+.label {
+  color: color-mix(in srgb, currentColor 65%, transparent);
+}
+
+.input,
+.select {
+  font: inherit;
+  padding: 0.45rem 0.6rem;
+  border-radius: 0.5rem;
+  border: 1px solid color-mix(in srgb, currentColor 25%, transparent);
+  background: var(--background);
+  color: inherit;
+  min-width: 0;
+}
+
+.button {
+  font: inherit;
+  padding: 0.45rem 1rem;
+  border-radius: 0.5rem;
+  border: 1px solid color-mix(in srgb, currentColor 30%, transparent);
+  background: color-mix(in srgb, currentColor 6%, transparent);
+  color: inherit;
+  cursor: pointer;
+}
+
+.button:focus-visible {
+  outline: 2px solid color-mix(in srgb, currentColor 55%, transparent);
+  outline-offset: 2px;
+}
+
+/*
+ * The hover tint must skip the filled variant: `.button:hover:not(:disabled)`
+ * outranks `.buttonPrimary` on specificity, so leaving the selector as it was
+ * replaced the fill on hover and the label lost its background again.
+ */
+.button:hover:not(:disabled):not(.buttonPrimary) {
+  background: color-mix(in srgb, currentColor 12%, transparent);
+}
+
+.button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/*
+ * Filled button: the page's foreground on its background, so the label is the
+ * inverse of the surface and stays readable in both colour schemes.
+ *
+ * It must not be built from `currentColor`. `currentColor` resolves to this
+ * same rule's own `color`, i.e. `--background`, which paints the fill with the
+ * page colour and leaves the text in the page colour too: white on white in
+ * light mode, near-black on near-black in dark mode.
+ */
+.buttonPrimary {
+  background: var(--foreground);
+  color: var(--background);
+  border-color: transparent;
+}
+
+.buttonPrimary:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--foreground) 88%, transparent);
+}
+
+.filterActions {
+  display: flex;
+  gap: 0.5rem;
+  align-items: end;
+  grid-column: 1 / -1;
+}
+
+/* --------------------------------------------------------------- summary */
+
+.stats {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(13rem, 1fr));
+  gap: 0.75rem;
+}
+
+.stat {
+  padding: 0.9rem 1rem;
+  border: 1px solid color-mix(in srgb, currentColor 18%, transparent);
+  border-radius: 0.75rem;
+  background: color-mix(in srgb, currentColor 4%, transparent);
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.statLabel {
+  font-size: 0.8rem;
+  color: color-mix(in srgb, currentColor 65%, transparent);
+}
+
+.statAmount {
+  font-size: 1.2rem;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.statMeta {
+  font-size: 0.75rem;
+  color: color-mix(in srgb, currentColor 55%, transparent);
+}
+
+/* ----------------------------------------------------------------- table */
+
+.tableWrap {
+  overflow-x: auto;
+  border: 1px solid color-mix(in srgb, currentColor 18%, transparent);
+  border-radius: 0.75rem;
+}
+
+.table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.85rem;
+}
+
+.table th,
+.table td {
+  padding: 0.6rem 0.75rem;
+  text-align: right;
+  border-bottom: 1px solid color-mix(in srgb, currentColor 12%, transparent);
+  white-space: nowrap;
+}
+
+.table th {
+  font-size: 0.75rem;
+  color: color-mix(in srgb, currentColor 65%, transparent);
+  background: color-mix(in srgb, currentColor 5%, transparent);
+}
+
+.table tbody tr:last-child td {
+  border-bottom: none;
+}
+
+.amount {
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+}
+
+.wrap {
+  white-space: normal;
+  min-width: 12rem;
+  max-width: 22rem;
+  color: color-mix(in srgb, currentColor 75%, transparent);
+}
+
+.invoiceLink {
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.empty {
+  padding: 2rem 1rem;
+  text-align: center;
+  color: color-mix(in srgb, currentColor 60%, transparent);
+  font-size: 0.9rem;
+}
+
+/* ----------------------------------------------------------------- admin */
+
+.section {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.sectionHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+
+.panelTitle {
+  font-size: 1.05rem;
+  font-weight: 700;
+  margin: 0;
+}
+
+.panel {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  padding: 1rem;
+  border: 1px solid color-mix(in srgb, currentColor 18%, transparent);
+  border-radius: 0.75rem;
+  background: color-mix(in srgb, currentColor 4%, transparent);
+}
+
+.formRow {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(13rem, 1fr));
+  gap: 0.75rem 1rem;
+  align-items: end;
+}
+
+.checklist {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  max-height: 11rem;
+  overflow-y: auto;
+  padding: 0.6rem 0.75rem;
+  border: 1px solid color-mix(in srgb, currentColor 22%, transparent);
+  border-radius: 0.5rem;
+  font-size: 0.85rem;
+}
+
+.checkItem {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  cursor: pointer;
+}
+
+.actions {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.details summary {
+  list-style: none;
+  cursor: pointer;
+  display: inline-block;
+}
+
+.details summary::-webkit-details-marker {
+  display: none;
+}
+
+.accessForm {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  margin-top: 0.5rem;
+  min-width: 14rem;
+}
+
+.badge {
+  display: inline-block;
+  padding: 0.15rem 0.55rem;
+  border-radius: 999px;
+  font-size: 0.75rem;
+  border: 1px solid transparent;
+}
+
+.badgeActive {
+  background: color-mix(in srgb, #16a34a 18%, transparent);
+  border-color: color-mix(in srgb, #16a34a 40%, transparent);
+}
+
+.badgeInactive {
+  background: color-mix(in srgb, currentColor 10%, transparent);
+  border-color: color-mix(in srgb, currentColor 30%, transparent);
+  color: color-mix(in srgb, currentColor 65%, transparent);
+}
+
+/* ------------------------------------------------------------ pagination */
+
+.pager {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+  font-size: 0.85rem;
+}
+
+.pagerLinks {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.muted {
+  color: color-mix(in srgb, currentColor 60%, transparent);
+}
