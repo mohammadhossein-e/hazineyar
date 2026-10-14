@@ -17,6 +17,7 @@ const DOMAIN_STATUS: Record<string, number> = {
   NOT_FOUND: 404,
   FORBIDDEN: 403,
   VALIDATION: 400,
+  CONFLICT: 409,
 };
 
 export function jsonError(
@@ -41,15 +42,15 @@ export function jsonOk<T>(data: T, status = 200): Response {
  */
 export function toErrorResponse(error: unknown): Response {
   if (error instanceof ZodError) {
-    return jsonError(
-      "اطلاعات ارسالی معتبر نیست",
-      "VALIDATION_ERROR",
-      400,
-      error.issues.map((issue) => ({
-        field: issue.path.join(".") || "_",
-        message: issue.message,
-      })),
-    );
+    const details = error.issues.map((issue) => ({
+      field: issue.path.join(".") || "_",
+      message: issue.message,
+    }));
+    // Surface the first issue's own message (e.g. "نام باید حداکثر ۸۰ کاراکتر
+    // باشد") instead of a generic line, so a single-field form tells the admin
+    // exactly what is wrong. The full list still travels in `details`.
+    const message = error.issues[0]?.message ?? "اطلاعات ارسالی معتبر نیست";
+    return jsonError(message, "VALIDATION_ERROR", 400, details);
   }
 
   if (error instanceof DomainError) {

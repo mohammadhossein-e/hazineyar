@@ -1,5 +1,6 @@
 generator client {
-  provider = "prisma-client-js"
+  provider        = "prisma-client-js"
+  previewFeatures = ["driverAdapters"]
 }
 
 datasource db {
@@ -20,6 +21,24 @@ enum ExpenseCategory {
   OTHER
 }
 
+enum AccessRequestStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+enum AuditAction {
+  EDIT
+  DELETE
+  CANCEL
+  RESTORE
+}
+
+enum AuditActorType {
+  ADMIN_DASHBOARD
+  EMPLOYEE
+}
+
 model User {
   id         String       @id @default(cuid())
   name       String
@@ -28,9 +47,15 @@ model User {
   role       Role         @default(EMPLOYEE)
   isActive   Boolean      @default(true)
   createdAt  DateTime     @default(now())
+  // The last project/category this user recorded against, so the bot can offer
+  // a one-tap "same as last time" shortcut. A plain id (no relation): the row
+  // may point at a since-deleted project and is validated at use time.
+  lastProjectId String?
+  lastCategory  ExpenseCategory?
 
-  userProjects UserProject[]
-  expenses     Expense[]     @relation("ExpenseToUser")
+  userProjects    UserProject[]
+  expenses        Expense[]     @relation("ExpenseToUser")
+  deletedExpenses Expense[]     @relation("ExpenseDeletedByUser")
 
   @@unique([channel, externalId])
   @@index([channel, externalId])
@@ -43,10 +68,25 @@ model Project {
   isActive  Boolean      @default(true)
   createdAt DateTime     @default(now())
 
-  expenses    Expense[]     @relation("ExpenseToProject")
-  userProjects UserProject[]
+  expenses       Expense[]               @relation("ExpenseToProject")
+  userProjects   UserProject[]
+  invoiceCounter ProjectInvoiceCounter?
 
   @@index([isActive])
+}
+
+/**
+ * Per-project invoice-number allocator. `lastNumber` is the highest suffix ever
+ * handed out (soft-deleted rows included), so numbers are never reused. It is
+ * seeded from the existing maximum when the row is missing and incremented
+ * atomically inside the create transaction.
+ */
+model ProjectInvoiceCounter {
+  projectId  String   @id
+  lastNumber Int      @default(0)
+  updatedAt  DateTime @default(now()) @updatedAt
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
 }
 
 model UserProject {
@@ -62,6 +102,36 @@ model UserProject {
   @@index([projectId])
 }
 
+model AccessRequest {
+  id          String              @id @default(cuid())
+  channel     String
+  externalId  String
+  displayName String
+  username    String?
+  status      AccessRequestStatus @default(PENDING)
+  createdAt   DateTime            @default(now())
+  decidedAt   DateTime?
+
+  @@unique([channel, externalId])
+  @@index([status])
+  @@index([createdAt])
+}
+
+model LinkedChat {
+  id             String   @id @default(cuid())
+  channel        String
+  externalChatId String
+  title          String
+  createdAt      DateTime @default(now())
+
+  @@unique([channel, externalChatId])
+}
+
+model Setting {
+  key   String @id
+  value String
+}
+
 model Expense {
   id              String           @id @default(cuid())
   projectId       String
@@ -73,10 +143,20 @@ model Expense {
   invoiceNumber   String           @default("invoice_000")
   expenseDate     DateTime
   createdAt       DateTime         @default(now())
+  updatedAt       DateTime         @default(now()) @updatedAt
   deletedAt       DateTime?
+  deletedReason   String?
+  deletedByType   AuditActorType?
+  deletedByUserId String?
+  // Which groups saw the announcement, as [{ chatId, messageId }]. A direct
+  // (private) expense may be announced to several linked groups, and a later
+  // correction goes back to each of them, so this is a list.
+  announcedChats  Json?
 
-  project Project @relation("ExpenseToProject", fields: [projectId], references: [id])
-  user    User    @relation("ExpenseToUser", fields: [userId], references: [id])
+  project   Project           @relation("ExpenseToProject", fields: [projectId], references: [id])
+  user      User              @relation("ExpenseToUser", fields: [userId], references: [id])
+  deletedBy User?             @relation("ExpenseDeletedByUser", fields: [deletedByUserId], references: [id])
+  auditLogs ExpenseAuditLog[]
 
   @@index([projectId])
   @@index([userId])
@@ -84,4 +164,20 @@ model Expense {
   @@index([expenseDate])
   @@index([deletedAt])
   @@unique([projectId, invoiceNumber])
+}
+
+model ExpenseAuditLog {
+  id          String         @id @default(cuid())
+  expenseId   String
+  action      AuditAction
+  actorType   AuditActorType
+  actorUserId String?
+  reason      String?
+  before      Json?
+  after       Json?
+  createdAt   DateTime       @default(now())
+
+  expense Expense @relation(fields: [expenseId], references: [id], onDelete: Cascade)
+
+  @@index([expenseId, createdAt])
 }

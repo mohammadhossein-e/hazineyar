@@ -13,11 +13,26 @@ export const roleSchema = z.enum(Role, {
   error: () => ({ message: "نقش کاربر نامعتبر است" }),
 });
 
+/**
+ * C0/C1 control characters plus DEL. Telegram display names can carry newlines
+ * or other invisible code points; they would corrupt the rendered table, the
+ * Excel cell and the bot greeting, so a manager-typed name must not contain
+ * them. (Nobody types these on purpose — this only rejects pasted garbage.)
+ */
+const CONTROL_CHARACTERS = /[\u0000-\u001f\u007f-\u009f]/;
+
 export const userNameSchema = z
   .string()
   .trim()
   .min(2, "نام باید حداقل ۲ کاراکتر باشد")
-  .max(MAX_USER_NAME_LENGTH, `نام باید حداکثر ${MAX_USER_NAME_LENGTH} کاراکتر باشد`);
+  .max(MAX_USER_NAME_LENGTH, `نام باید حداکثر ${MAX_USER_NAME_LENGTH} کاراکتر باشد`)
+  .refine(
+    (value) => !CONTROL_CHARACTERS.test(value),
+    "نام نمی‌تواند نویسه‌های کنترلی داشته باشد",
+  );
+
+/** Body for renaming an existing user: the same rules as creating one. */
+export const userNameInputSchema = z.object({ name: userNameSchema });
 
 export const createUserSchema = z.object({
   name: userNameSchema,

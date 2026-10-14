@@ -1,6 +1,16 @@
 import Link from "next/link";
-import { presentProjects } from "@/core/projects/presenter";
+import {
+  presentAccessRequests,
+  type PresentedAccessRequest,
+} from "@/core/access/presenter";
+import {
+  listPendingAccessRequests,
+  listRejectedAccessRequests,
+} from "@/core/access/service";
+import { presentProjects, type PresentedProject } from "@/core/projects/presenter";
 import { listAllProjects } from "@/core/projects/service";
+import { getAnnouncementSettings } from "@/core/settings/service";
+import { getCancellationSettings } from "@/core/settings/service";
 import { presentUsers } from "@/core/users/presenter";
 import { listAllUsers } from "@/core/users/service";
 import { requireSession } from "@/lib/auth";
@@ -22,13 +32,220 @@ const formatToman = (value: number) => value.toLocaleString("en-US");
 export default async function AdminPage() {
   await requireSession();
 
-  const [projects, users] = await Promise.all([listAllProjects(), listAllUsers()]);
+  const [projects, users, pendingRequests, rejectedRequests, settings, cancellation] =
+    await Promise.all([
+      listAllProjects(),
+      listAllUsers(),
+      listPendingAccessRequests(),
+      listRejectedAccessRequests(),
+      getAnnouncementSettings(),
+      getCancellationSettings(),
+    ]);
   const viewProjects = presentProjects(projects);
   const viewUsers = presentUsers(users);
   const activeProjects = viewProjects.filter((p) => p.isActive);
+  const pending = presentAccessRequests(pendingRequests);
+  const rejected = presentAccessRequests(rejectedRequests);
 
   return (
     <main style={{ display: "flex", flexDirection: "column", gap: "1.5rem" }}>
+      <section className={styles.section}>
+        <div className={styles.sectionHeader}>
+          <h2 className={styles.panelTitle}>درخواست‌های دسترسی</h2>
+        </div>
+
+        {pending.length === 0 ? (
+          <p className={styles.emptyState} data-testid="pending-empty">
+            از کارمند بخواهید ربات را در پیام خصوصی Start کند. درخواستش اینجا
+            نمایش داده می‌شود.
+          </p>
+        ) : (
+          <div className={styles.tableWrap}>
+            <table className={styles.table}>
+              <thead>
+                <tr>
+                  <th>نام</th>
+                  <th>نام کاربری تلگرام</th>
+                  <th>تاریخ درخواست</th>
+                  <th>عملیات</th>
+                </tr>
+              </thead>
+              <tbody>
+                {pending.map((request) => (
+                  <tr key={request.id}>
+                    <td data-label="نام">{request.displayName}</td>
+                    <td data-label="نام کاربری تلگرام">
+                      {request.username ? (
+                        `@${request.username}`
+                      ) : (
+                        <span className={styles.muted}>—</span>
+                      )}
+                    </td>
+                    <td data-label="تاریخ درخواست">{request.createdAtJalali}</td>
+                    <td data-label="عملیات">
+                      <div className={styles.actions}>
+                        <details className={styles.details}>
+                          <summary className={styles.button}>تایید</summary>
+                          <ApproveForm
+                            request={request}
+                            activeProjects={activeProjects}
+                          />
+                        </details>
+                        <JsonForm
+                          action={`/api/admin/access-requests/${request.id}/reject`}
+                          submitLabel="رد"
+                          primary={false}
+                        />
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+
+        {rejected.length > 0 && (
+          <>
+            <p className={styles.hint}>
+              درخواست‌های ردشده؛ در صورت نیاز می‌توانید تصمیم را با «تایید
+              مجدد» برگردانید.
+            </p>
+            <div className={styles.tableWrap}>
+              <table className={styles.table}>
+                <thead>
+                  <tr>
+                    <th>نام</th>
+                    <th>نام کاربری تلگرام</th>
+                    <th>تاریخ درخواست</th>
+                    <th>عملیات</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {rejected.map((request) => (
+                    <tr key={request.id}>
+                      <td data-label="نام">{request.displayName}</td>
+                      <td data-label="نام کاربری تلگرام">
+                        {request.username ? (
+                          `@${request.username}`
+                        ) : (
+                          <span className={styles.muted}>—</span>
+                        )}
+                      </td>
+                      <td data-label="تاریخ درخواست">{request.createdAtJalali}</td>
+                      <td data-label="عملیات">
+                        <details className={styles.details}>
+                          <summary className={styles.button}>تایید مجدد</summary>
+                          <ApproveForm
+                            request={request}
+                            activeProjects={activeProjects}
+                          />
+                        </details>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </>
+        )}
+
+        <p className={styles.hint}>
+          کاربران ناشناس تلگرام که در چت خصوصی ربات دستور /start را می‌زنند
+          اینجا فهرست می‌شوند. با «تایید» حساب ساخته می‌شود و به کاربر در
+          تلگرام اطلاع داده می‌شود؛ «رد» تا زمانی که خودتان تصمیم را عوض
+          نکنید باقی می‌ماند.
+        </p>
+      </section>
+
+      <section className={styles.section}>
+        <div className={styles.sectionHeader}>
+          <h2 className={styles.panelTitle}>تنظیمات اعلام در گروه</h2>
+        </div>
+        <JsonForm
+          action="/api/admin/settings"
+          submitLabel="ذخیره تنظیمات"
+          boolFields={["includeInvoice", "announceDirectExpenses"]}
+          className={styles.panel}
+        >
+          <div className={styles.formRow}>
+            <label className={styles.field}>
+              <span className={styles.label}>حالت اعلام در گروه</span>
+              <select
+                name="announceMode"
+                className={styles.select}
+                defaultValue={settings.announceMode}
+              >
+                <option value="FULL">
+                  کامل (نام، پروژه، دسته، مبلغ، توضیحات، شماره فاکتور)
+                </option>
+                <option value="MINIMAL">
+                  خلاصه (فقط ثبت شد + نام + پروژه)
+                </option>
+                <option value="OFF">خاموش (اعلام نشود)</option>
+              </select>
+            </label>
+          </div>
+          <div className={styles.checklist}>
+            <label className={styles.checkItem}>
+              <input
+                type="checkbox"
+                name="includeInvoice"
+                defaultChecked={settings.includeInvoice}
+              />
+              <span>ارسال فایل فاکتور همراه اعلام در گروه</span>
+            </label>
+            <label className={styles.checkItem}>
+              <input
+                type="checkbox"
+                name="announceDirectExpenses"
+                defaultChecked={settings.announceDirectExpenses}
+              />
+              <span>اعلام هزینه‌های ثبت‌شده مستقیم در گروه</span>
+            </label>
+          </div>
+        </JsonForm>
+        <p className={styles.hint}>
+          این تنظیمات هنگام ثبت هر هزینه از دیتابیس خوانده می‌شود، پس تغییر
+          آن‌ها بدون راه‌اندازی دوباره ربات اعمال می‌شود. اعلام فقط به
+          گروه‌هایی فرستاده می‌شود که با دستور /linkgroup متصل شده‌اند.
+        </p>
+      </section>
+
+      <section className={styles.section}>
+        <div className={styles.sectionHeader}>
+          <h2 className={styles.panelTitle}>لغو هزینه توسط ثبت‌کننده</h2>
+        </div>
+        <JsonForm
+          action="/api/admin/cancellation-settings"
+          submitLabel="ذخیره تنظیمات"
+          className={styles.panel}
+        >
+          <div className={styles.formRow}>
+            <label className={styles.field}>
+              <span className={styles.label}>
+                مهلت لغو (دقیقه) — صفر یعنی غیرفعال
+              </span>
+              <input
+                type="number"
+                name="windowMinutes"
+                min={0}
+                max={1440}
+                step={1}
+                required
+                defaultValue={cancellation.windowMinutes}
+                className={styles.input}
+              />
+            </label>
+          </div>
+        </JsonForm>
+        <p className={styles.hint}>
+          پس از ثبت هر هزینه، دکمه «لغو این هزینه» به مدت این مهلت به خود
+          ثبت‌کننده نشان داده می‌شود. با عدد صفر، این دکمه نمایش داده نمی‌شود و
+          لغو فقط از داشبورد ممکن است.
+        </p>
+      </section>
+
       <section className={styles.section}>
         <div className={styles.sectionHeader}>
           <h2 className={styles.panelTitle}>پروژه‌ها</h2>
@@ -77,14 +294,14 @@ export default async function AdminPage() {
               ) : (
                 viewProjects.map((project) => (
                   <tr key={project.id}>
-                    <td>{project.name}</td>
-                    <td>
+                    <td data-label="نام پروژه">{project.name}</td>
+                    <td data-label="وضعیت">
                       <StatusBadge active={project.isActive} />
                     </td>
-                    <td className={styles.amount}>
+                    <td data-label="تعداد هزینه‌ها" className={styles.amount}>
                       {formatToman(project.expenseCount ?? 0)}
                     </td>
-                    <td>
+                    <td data-label="عملیات">
                       <JsonForm
                         action={`/api/admin/projects/${project.id}/status`}
                         fixed={{ isActive: !project.isActive }}
@@ -111,68 +328,77 @@ export default async function AdminPage() {
           <h2 className={styles.panelTitle}>کاربران</h2>
         </div>
 
-        <JsonForm
-          action="/api/admin/users"
-          submitLabel="افزودن کارمند جدید"
-          listFields={["projectIds"]}
-          className={styles.panel}
-        >
-          <div className={styles.formRow}>
-            <label className={styles.field}>
-              <span className={styles.label}>نام و نام خانوادگی</span>
-              <input
-                type="text"
-                name="name"
-                required
-                maxLength={80}
-                className={styles.input}
-                placeholder="مثلاً سعید محمدی"
-              />
-            </label>
-
-            <label className={styles.field}>
-              <span className={styles.label}>شناسه عددی تلگرام</span>
-              <input
-                type="text"
-                name="externalId"
-                required
-                inputMode="numeric"
-                pattern="[0-9]{5,20}"
-                className={styles.input}
-                placeholder="مثلاً 123456789"
-              />
-            </label>
-
-            <label className={styles.field}>
-              <span className={styles.label}>نقش</span>
-              <select name="role" className={styles.select} defaultValue="EMPLOYEE">
-                <option value="EMPLOYEE">کارمند</option>
-                <option value="ADMIN">ادمین</option>
-              </select>
-            </label>
-          </div>
-
-          <span className={styles.label}>
-            پروژه‌هایی که مجاز به ثبت هزینه در آن‌هاست
-          </span>
-          <p className={styles.hint}>
-            کارمند باید ابتدا یک‌بار به ربات پیام بدهد (مثلاً دستور /start) و
-            سپس شناسه عددی خود را از ربات UserInfoBot (@userinfobot) بگیرد و همین‌جا
-            وارد کند. ربات کاربر را با همین شناسه پیدا می‌کند.
-          </p>
-          <div className={styles.checklist}>
-            {activeProjects.length === 0 ? (
-              <span className={styles.muted}>هنوز پروژه فعالی وجود ندارد.</span>
-            ) : (
-              activeProjects.map((project) => (
-                <label key={project.id} className={styles.checkItem}>
-                  <input type="checkbox" name="projectIds" value={project.id} />
-                  <span>{project.name}</span>
+        <details className={styles.disclosure} data-testid="manual-user">
+          <summary className={styles.disclosureSummary}>
+            افزودن دستی کاربر (پیشرفته)
+          </summary>
+          <div className={styles.disclosureBody}>
+            <JsonForm
+              action="/api/admin/users"
+              submitLabel="افزودن کارمند جدید"
+              listFields={["projectIds"]}
+              className={styles.panel}
+            >
+              <div className={styles.formRow}>
+                <label className={styles.field}>
+                  <span className={styles.label}>نام و نام خانوادگی</span>
+                  <input
+                    type="text"
+                    name="name"
+                    required
+                    maxLength={80}
+                    className={styles.input}
+                    placeholder="مثلاً سعید محمدی"
+                  />
                 </label>
-              ))
-            )}
+
+                <label className={styles.field}>
+                  <span className={styles.label}>شناسه عددی تلگرام</span>
+                  <input
+                    type="text"
+                    name="externalId"
+                    required
+                    inputMode="numeric"
+                    pattern="[0-9]{5,20}"
+                    className={styles.input}
+                    placeholder="مثلاً 123456789"
+                  />
+                </label>
+
+                <label className={styles.field}>
+                  <span className={styles.label}>نقش</span>
+                  <select name="role" className={styles.select} defaultValue="EMPLOYEE">
+                    <option value="EMPLOYEE">کارمند</option>
+                    <option value="ADMIN">ادمین</option>
+                  </select>
+                </label>
+              </div>
+
+              <span className={styles.label}>
+                پروژه‌هایی که مجاز به ثبت هزینه در آن‌هاست
+              </span>
+              <p className={styles.hint}>
+                این فرم فقط برای کسانی است که هنوز با ربات تماس نگرفته‌اند و در
+                فهرست «درخواست‌های دسترسی» بالا دیده نمی‌شوند. شناسه عددی تلگرام
+                را می‌توانید از یک درخواست دسترسی کپی کنید، یا کاربر آن را از
+                ربات @userinfobot بگیرد. اگر شخص قبلاً در چت خصوصی /start زده
+                باشد، به‌جای این فرم از «تایید» همان درخواست استفاده کنید.
+              </p>
+              <div className={styles.checklist}>
+                {activeProjects.length === 0 ? (
+                  <span className={styles.muted}>هنوز پروژه فعالی وجود ندارد.</span>
+                ) : (
+                  activeProjects.map((project) => (
+                    <label key={project.id} className={styles.checkItem}>
+                      <input type="checkbox" name="projectIds" value={project.id} />
+                      <span>{project.name}</span>
+                    </label>
+                  ))
+                )}
+              </div>
+            </JsonForm>
           </div>
-        </JsonForm>
+        </details>
 
         <div className={styles.tableWrap}>
           <table className={styles.table}>
@@ -196,22 +422,22 @@ export default async function AdminPage() {
               ) : (
                 viewUsers.map((user) => (
                   <tr key={user.id}>
-                    <td>{user.name}</td>
-                    <td>{user.roleLabel}</td>
-                    <td>
+                    <td data-label="نام">{user.name}</td>
+                    <td data-label="نقش">{user.roleLabel}</td>
+                    <td data-label="شناسه تلگرام">
                       <span className={styles.muted}>{user.externalId}</span>
                     </td>
-                    <td>
+                    <td data-label="وضعیت">
                       <StatusBadge active={user.isActive} />
                     </td>
-                    <td className={styles.wrap}>
+                    <td data-label="پروژه‌های مرتبط" className={styles.wrap}>
                       {user.projects.length === 0
                         ? "—"
                         : user.projects
                             .map((p) => (p.isActive ? p.name : `${p.name} (غیرفعال)`))
                             .join("، ")}
                     </td>
-                    <td>
+                    <td data-label="عملیات">
                       <div className={styles.actions}>
                         <JsonForm
                           action={`/api/admin/users/${user.id}/status`}
@@ -219,6 +445,31 @@ export default async function AdminPage() {
                           submitLabel={user.isActive ? "غیرفعال کردن" : "فعال کردن"}
                           primary={false}
                         />
+                        <details className={styles.details}>
+                          <summary className={styles.button}>ویرایش نام</summary>
+                          <JsonForm
+                            action={`/api/admin/users/${user.id}/name`}
+                            submitLabel="ذخیره نام"
+                            className={styles.accessForm}
+                          >
+                            <label className={styles.field}>
+                              <span className={styles.label}>نام کاربر</span>
+                              <input
+                                type="text"
+                                name="name"
+                                required
+                                minLength={2}
+                                maxLength={80}
+                                defaultValue={user.name}
+                                className={styles.input}
+                              />
+                            </label>
+                            <span className={styles.reference}>
+                              نام جدید در گزارش‌ها، فایل اکسل و هزینه‌های
+                              قبلی این کاربر نمایش داده می‌شود.
+                            </span>
+                          </JsonForm>
+                        </details>
                         <details className={styles.details}>
                           <summary className={styles.button}>
                             ویرایش دسترسی پروژه‌ها
@@ -268,6 +519,69 @@ export default async function AdminPage() {
         </p>
       </section>
     </main>
+  );
+}
+
+/**
+ * The approve form shared by the pending and rejected lists. The name is
+ * prefilled with what Telegram reported, the admin can correct it, and the
+ * same server-side validation as the manual form runs on submit.
+ */
+function ApproveForm({
+  request,
+  activeProjects,
+}: {
+  request: PresentedAccessRequest;
+  activeProjects: PresentedProject[];
+}) {
+  return (
+    <JsonForm
+      action={`/api/admin/access-requests/${request.id}/approve`}
+      submitLabel="تایید و ساخت کاربر"
+      listFields={["projectIds"]}
+      className={styles.accessForm}
+    >
+      <label className={styles.field}>
+        <span className={styles.label}>نام کاربر</span>
+        <input
+          type="text"
+          name="name"
+          required
+          minLength={2}
+          maxLength={80}
+          defaultValue={request.displayName}
+          className={styles.input}
+        />
+        <span className={styles.reference}>
+          روی تلگرام: {request.displayName}
+          {request.username ? ` — @${request.username}` : ""}
+        </span>
+      </label>
+
+      <label className={styles.field}>
+        <span className={styles.label}>نقش</span>
+        <select name="role" className={styles.select} defaultValue="EMPLOYEE">
+          <option value="EMPLOYEE">کارمند</option>
+          <option value="ADMIN">ادمین</option>
+        </select>
+      </label>
+
+      <span className={styles.label}>
+        پروژه‌هایی که مجاز به ثبت هزینه در آن‌هاست
+      </span>
+      <div className={styles.checklist}>
+        {activeProjects.length === 0 ? (
+          <span className={styles.muted}>هنوز پروژه فعالی وجود ندارد.</span>
+        ) : (
+          activeProjects.map((project) => (
+            <label key={project.id} className={styles.checkItem}>
+              <input type="checkbox" name="projectIds" value={project.id} />
+              <span>{project.name}</span>
+            </label>
+          ))
+        )}
+      </div>
+    </JsonForm>
   );
 }
 

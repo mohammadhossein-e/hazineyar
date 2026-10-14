@@ -16,6 +16,11 @@ type JsonFormProps = {
    * ticked — that is how "revoke every project" is expressed.
    */
   listFields?: string[];
+  /**
+   * Checkbox names sent as real booleans (true when ticked, false otherwise)
+   * instead of the browser's default "on"/absent, e.g. includeInvoice.
+   */
+  boolFields?: string[];
   className?: string;
   /**
    * Filled (default) or outline. Row-level actions pass false so a table of
@@ -41,11 +46,13 @@ export function JsonForm({
   submitLabel,
   fixed,
   listFields = [],
+  boolFields = [],
   className,
   primary = true,
 }: JsonFormProps) {
   const router = useRouter();
   const [error, setError] = useState<string | null>(null);
+  const [warning, setWarning] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
 
   const submit = async (event: React.FormEvent<HTMLFormElement>) => {
@@ -55,12 +62,14 @@ export function JsonForm({
 
     const payload: Record<string, unknown> = { ...fixed };
     for (const key of listFields) payload[key] = data.getAll(key).map(String);
+    for (const key of boolFields) payload[key] = data.has(key);
     data.forEach((value, key) => {
       if (!(key in payload)) payload[key] = value;
     });
 
     setPending(true);
     setError(null);
+    setWarning(null);
     try {
       const response = await fetch(action, {
         method: "POST",
@@ -75,6 +84,10 @@ export function JsonForm({
         );
         return;
       }
+
+      // A soft outcome the server chose to surface (e.g. the account was made
+      // but the Telegram notice could not be delivered).
+      if (typeof body?.warning === "string") setWarning(body.warning);
 
       form.reset();
       router.refresh();
@@ -102,6 +115,11 @@ export function JsonForm({
       {error && (
         <p className={styles.error} role="alert">
           {error}
+        </p>
+      )}
+      {warning && (
+        <p className={styles.hint} role="status">
+          {warning}
         </p>
       )}
     </form>

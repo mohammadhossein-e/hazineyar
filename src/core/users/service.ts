@@ -3,6 +3,7 @@ import type { Role } from "@prisma/client";
 import { ForbiddenError, NotFoundError, ValidationError } from "../errors";
 import {
   createUserSchema,
+  userNameSchema,
   type CreateStaffUserInput,
   type UserProjectsInput,
 } from "./schemas";
@@ -118,6 +119,63 @@ export async function getUserOrThrow(id: string) {
   const user = await getUserById(id);
   if (!user) throw new NotFoundError("کاربر یافت نشد");
   return user;
+}
+
+/**
+ * The first active user already carrying this name, ignoring `exceptId`.
+ *
+ * Names are deliberately not unique — two employees can genuinely share one —
+ * so this only feeds a soft "someone else has this name" warning; it never
+ * blocks a write.
+ */
+export async function findActiveUserByName(name: string, exceptId?: string) {
+  return prisma.user.findFirst({
+    where: {
+      isActive: true,
+      name,
+      ...(exceptId ? { id: { not: exceptId } } : {}),
+    },
+    select: { id: true, name: true },
+  });
+}
+
+/** The soft warning shown when an active user already shares a name, if any. */
+export async function duplicateNameWarning(
+  name: string,
+  exceptId?: string,
+): Promise<string | undefined> {
+  const existing = await findActiveUserByName(name, exceptId);
+  return existing ? "کاربر دیگری با این نام وجود دارد" : undefined;
+}
+
+/**
+ * Renames a user in place.
+ *
+ * Expenses reference the user by id, so every historical row, the dashboard and
+ * the Excel export start showing the new name at once — that is the intended
+ * behaviour, not a data migration. There is no user-audit table, so the change
+ * is recorded with the existing logging approach (a structured console line).
+ */
+export async function renameUser(id: string, name: string) {
+  const parsed = userNameSchema.parse(name);
+  const before = await getUserOrThrow(id);
+
+  if (before.name === parsed) {
+    return prisma.user.findUniqueOrThrow({
+      where: { id },
+      include: USER_WITH_PROJECTS,
+    });
+  }
+
+  const updated = await prisma.user.update({
+    where: { id },
+    data: { name: parsed },
+    include: USER_WITH_PROJECTS,
+  });
+
+  console.info(`[users] renamed user ${id} from "${before.name}" to "${parsed}"`);
+
+  return updated;
 }
 
 /**

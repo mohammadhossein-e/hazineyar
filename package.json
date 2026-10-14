@@ -11,11 +11,13 @@
     "prisma:migrate": "prisma migrate dev",
     "prisma:seed": "tsx prisma/seed.ts",
     "prisma:db-push": "prisma db push",
-    "test:expenses": "tsx scripts/test-expenses.ts",
-    "test:admin": "tsx scripts/test-admin.ts",
+    "test:expenses": "node scripts/run-e2e-with-test-db.mjs scripts/test-expenses.ts",
+    "test:admin": "node scripts/run-e2e-with-test-db.mjs scripts/test-admin.ts",
     "manage": "tsx scripts/manage.ts",
     "bot:dev": "tsx scripts/start-bot.ts",
-    "test:bot": "tsx scripts/test-bot.ts"
+    "test:bot": "node scripts/run-with-test-db.mjs scripts/test-bot.ts",
+    "db:test:create": "node scripts/db-test-create.mjs",
+    "db:test:migrate": "node scripts/db-test-migrate.mjs"
   },
   "dependencies": {
     "@grammyjs/conversations": "^2.1.1",

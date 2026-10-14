@@ -1,6 +1,7 @@
-import type { Expense, Prisma } from "@prisma/client";
+import type { Expense, ExpenseAuditLog, Prisma } from "@prisma/client";
 import { formatJalaliUtc, type DateRange } from "@/lib/jalali";
 import { categoryLabel } from "./categories";
+import { parseAnnouncedChats, type AnnouncedChat } from "./announcement";
 import type { ExpenseSummary } from "./service";
 
 export type ExpenseWithRelations = Prisma.ExpenseGetPayload<{
@@ -24,7 +25,13 @@ export type PresentedExpense = {
   expenseDate: string;
   expenseDateJalali: string;
   createdAt: string;
+  updatedAt: string;
   deletedAt: string | null;
+  deletedReason: string | null;
+  deletedByType: Expense["deletedByType"];
+  announcedChats: AnnouncedChat[];
+  /** Set by the dashboard when it knows an EDIT entry exists in the history. */
+  isEdited?: boolean;
 };
 
 /**
@@ -34,6 +41,7 @@ export type PresentedExpense = {
  */
 export function presentExpense(
   expense: Expense | ExpenseWithRelations,
+  options: { isEdited?: boolean } = {},
 ): PresentedExpense {
   const withRelations = expense as Partial<ExpenseWithRelations>;
 
@@ -55,12 +63,63 @@ export function presentExpense(
     expenseDate: expense.expenseDate.toISOString(),
     expenseDateJalali: formatJalaliUtc(expense.expenseDate),
     createdAt: expense.createdAt.toISOString(),
+    updatedAt: expense.updatedAt.toISOString(),
     deletedAt: expense.deletedAt ? expense.deletedAt.toISOString() : null,
+    deletedReason: expense.deletedReason,
+    deletedByType: expense.deletedByType,
+    announcedChats: parseAnnouncedChats(expense.announcedChats),
+    ...(options.isEdited !== undefined ? { isEdited: options.isEdited } : {}),
   };
 }
 
 export function presentExpenses(expenses: (Expense | ExpenseWithRelations)[]) {
-  return expenses.map(presentExpense);
+  return expenses.map((expense) => presentExpense(expense));
+}
+
+export type PresentedAuditLog = {
+  id: string;
+  action: ExpenseAuditLog["action"];
+  actionLabel: string;
+  actorType: ExpenseAuditLog["actorType"];
+  actorLabel: string;
+  actorUserId: string | null;
+  reason: string | null;
+  before: unknown;
+  after: unknown;
+  createdAt: string;
+  createdAtJalali: string;
+};
+
+const AUDIT_ACTION_LABELS: Record<ExpenseAuditLog["action"], string> = {
+  EDIT: "ویرایش",
+  DELETE: "حذف",
+  CANCEL: "لغو",
+  RESTORE: "بازگردانی",
+};
+
+const AUDIT_ACTOR_LABELS: Record<ExpenseAuditLog["actorType"], string> = {
+  ADMIN_DASHBOARD: "مدیر (داشبورد)",
+  EMPLOYEE: "ثبت‌کننده (ربات)",
+};
+
+export function presentAuditLog(log: ExpenseAuditLog): PresentedAuditLog {
+  return {
+    id: log.id,
+    action: log.action,
+    actionLabel: AUDIT_ACTION_LABELS[log.action],
+    actorType: log.actorType,
+    actorLabel: AUDIT_ACTOR_LABELS[log.actorType],
+    actorUserId: log.actorUserId,
+    reason: log.reason,
+    before: log.before,
+    after: log.after,
+    createdAt: log.createdAt.toISOString(),
+    createdAtJalali: formatJalaliUtc(log.createdAt),
+  };
+}
+
+export function presentAuditLogs(logs: ExpenseAuditLog[]) {
+  return logs.map(presentAuditLog);
 }
 
 function presentPeriod(range: DateRange) {

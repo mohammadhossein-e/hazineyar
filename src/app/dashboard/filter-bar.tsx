@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useRef, type FormEvent } from "react";
+import { useMemo, useRef, useState, type FormEvent } from "react";
 import styles from "./dashboard.module.css";
 
 type MenuOption = { id: string; name: string; isActive?: boolean };
@@ -42,6 +42,20 @@ function label(option: MenuOption): string {
 export function FilterBar({ projects, users, categories, initial, exportHref }: FilterBarProps) {
   const router = useRouter();
   const formRef = useRef<HTMLFormElement>(null);
+  const [filtersOpen, setFiltersOpen] = useState(false);
+
+  /**
+   * How many filters are doing something, so the collapsed bar can say so.
+   * «همه» counts only when a non-default project is selected; the inactive
+   * toggle counts when it is on.
+   */
+  const activeCount = useMemo(() => {
+    const values = [initial.category, initial.user, initial.from, initial.to];
+    return (
+      values.filter((value) => value !== "").length +
+      (initial.all === "1" ? 1 : 0)
+    );
+  }, [initial.category, initial.user, initial.from, initial.to, initial.all]);
 
   const apply = () => {
     const form = formRef.current;
@@ -66,62 +80,80 @@ export function FilterBar({ projects, users, categories, initial, exportHref }: 
 
   return (
     <form ref={formRef} method="get" action="/dashboard" onSubmit={onSubmit} className={styles.filters}>
-      <label className={styles.field}>
-        <span className={styles.label}>پروژه</span>
-        <select name="project" className={styles.select} defaultValue={initial.project} onChange={apply}>
-          <option value="">همه پروژه‌ها</option>
-          {projects.map((project) => (
-            <option key={project.id} value={project.id}>
-              {label(project)}
-            </option>
-          ))}
-        </select>
-      </label>
+      <button
+        type="button"
+        className={styles.filterToggle}
+        aria-expanded={filtersOpen}
+        aria-controls="dashboard-filters"
+        onClick={() => setFiltersOpen((open) => !open)}
+      >
+        <span>فیلترها</span>
+        {activeCount > 0 && <span className={styles.filterCount}>{activeCount}</span>}
+      </button>
 
-      <label className={styles.field}>
-        <span className={styles.label}>دسته‌بندی</span>
-        <select name="category" className={styles.select} defaultValue={initial.category} onChange={apply}>
-          <option value="">همه</option>
-          {categories.map((category) => (
-            <option key={category.value} value={category.value}>
-              {category.label}
-            </option>
-          ))}
-        </select>
-      </label>
+      <div
+        id="dashboard-filters"
+        className={[styles.fields, filtersOpen && styles.fieldsOpen]
+          .filter(Boolean)
+          .join(" ")}
+      >
+        <label className={styles.field}>
+          <span className={styles.label}>پروژه</span>
+          <select name="project" className={styles.select} defaultValue={initial.project} onChange={apply}>
+            <option value="">همه پروژه‌ها</option>
+            {projects.map((project) => (
+              <option key={project.id} value={project.id}>
+                {label(project)}
+              </option>
+            ))}
+          </select>
+        </label>
 
-      <label className={styles.field}>
-        <span className={styles.label}>ثبت‌کننده</span>
-        <select name="user" className={styles.select} defaultValue={initial.user} onChange={apply}>
-          <option value="">همه</option>
-          {users.map((record) => (
-            <option key={record.id} value={record.id}>
-              {label(record)}
-            </option>
-          ))}
-        </select>
-      </label>
+        <label className={styles.field}>
+          <span className={styles.label}>دسته‌بندی</span>
+          <select name="category" className={styles.select} defaultValue={initial.category} onChange={apply}>
+            <option value="">همه</option>
+            {categories.map((category) => (
+              <option key={category.value} value={category.value}>
+                {category.label}
+              </option>
+            ))}
+          </select>
+        </label>
 
-      <label className={styles.field}>
-        <span className={styles.label}>از تاریخ</span>
-        <input type="date" name="from" className={styles.input} defaultValue={initial.from} onChange={apply} />
-      </label>
+        <label className={styles.field}>
+          <span className={styles.label}>ثبت‌کننده</span>
+          <select name="user" className={styles.select} defaultValue={initial.user} onChange={apply}>
+            <option value="">همه</option>
+            {users.map((record) => (
+              <option key={record.id} value={record.id}>
+                {label(record)}
+              </option>
+            ))}
+          </select>
+        </label>
 
-      <label className={styles.field}>
-        <span className={styles.label}>تا تاریخ</span>
-        <input type="date" name="to" className={styles.input} defaultValue={initial.to} onChange={apply} />
-      </label>
+        <label className={styles.field}>
+          <span className={styles.label}>از تاریخ</span>
+          <input type="date" name="from" className={styles.input} defaultValue={initial.from} onChange={apply} />
+        </label>
 
-      <label className={styles.checkItem}>
-        <input
-          type="checkbox"
-          name="all"
-          value="1"
-          defaultChecked={initial.all === "1"}
-          onChange={apply}
-        />
-        <span>نمایش پروژه‌ها و کاربران غیرفعال</span>
-      </label>
+        <label className={styles.field}>
+          <span className={styles.label}>تا تاریخ</span>
+          <input type="date" name="to" className={styles.input} defaultValue={initial.to} onChange={apply} />
+        </label>
+
+        <label className={styles.checkItem}>
+          <input
+            type="checkbox"
+            name="all"
+            value="1"
+            defaultChecked={initial.all === "1"}
+            onChange={apply}
+          />
+          <span>نمایش پروژه‌ها و کاربران غیرفعال</span>
+        </label>
+      </div>
 
       <div className={styles.filterActions}>
         <button type="submit" className={`${styles.button} ${styles.buttonPrimary}`}>

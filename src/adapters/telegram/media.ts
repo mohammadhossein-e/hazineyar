@@ -91,22 +91,17 @@ function label(media: InvoiceMedia): string {
 }
 
 /**
- * Turns an attached invoice into bytes, validating at every step and logging
+ * Downloads a described invoice to bytes, validating at every step and logging
  * which one ran, so a rejection in the bot is traceable on the server instead
  * of showing up only as a message to the user.
  *
  * Throws a `ValidationError` with a user-facing reason, which the conversation
  * turns into a re-prompt.
  */
-export async function downloadInvoiceMedia(
+export async function downloadInvoice(
   api: Api<RawApi>,
-  message: Message,
+  media: InvoiceMedia,
 ): Promise<{ buffer: Buffer; mimeType: string }> {
-  const media = resolveInvoiceMedia(message);
-  if (!media) {
-    telegramWarn("invoice rejected: the message has no photo and no document");
-    throw new ValidationError("فایلی ارسال نشده است");
-  }
   telegramLog(`invoice received: ${label(media)}`, {
     mimeType: media.mimeType || "(none reported)",
     size: media.size ?? "(unknown)",
@@ -138,4 +133,21 @@ export async function downloadInvoiceMedia(
   assertWithinSizeLimit(buffer.byteLength);
 
   return { buffer, mimeType: media.mimeType };
+}
+
+/**
+ * Turns an attached invoice into bytes. Kept as the message-shaped entry point
+ * for the guided flow; a message handed to the bot before any flow starts is
+ * resolved to its `InvoiceMedia` and passed to `downloadInvoice` directly.
+ */
+export async function downloadInvoiceMedia(
+  api: Api<RawApi>,
+  message: Message,
+): Promise<{ buffer: Buffer; mimeType: string }> {
+  const media = resolveInvoiceMedia(message);
+  if (!media) {
+    telegramWarn("invoice rejected: the message has no photo and no document");
+    throw new ValidationError("فایلی ارسال نشده است");
+  }
+  return downloadInvoice(api, media);
 }

@@ -128,3 +128,83 @@ export function parseExpenseListQuery(raw: Record<string, string>): ExpenseListS
 
 export type CreateExpenseInput = z.infer<typeof createExpenseSchema>;
 export type ListExpensesQuery = z.infer<typeof listExpensesQuerySchema>;
+
+/** Optional free-text reason attached to a delete/cancel, shown in the audit. */
+export const auditReasonSchema = z
+  .string()
+  .trim()
+  .max(MAX_DESCRIPTION_LENGTH)
+  .optional();
+
+/**
+ * The `updatedAt` the caller last saw, as an ISO string. Used for optimistic
+ * concurrency: a stale value means someone else changed the row first.
+ */
+const expectedUpdatedAtSchema = z.coerce.date().optional();
+
+/**
+ * Editable fields. Every field is optional so the dashboard can PATCH a single
+ * column; the service validates at least one real change. `expectedUpdatedAt`
+ * is the optimistic-concurrency token.
+ */
+export const editExpenseSchema = z
+  .object({
+    projectId: z.string().min(1, "شناسه پروژه الزامی است").optional(),
+    userId: z.string().min(1, "شناسه کاربر الزامی است").optional(),
+    category: categorySchema.optional(),
+    amount: amountSchema.optional(),
+    description: z
+      .string()
+      .trim()
+      .max(MAX_DESCRIPTION_LENGTH)
+      .nullable()
+      .optional(),
+    expenseDate: z.coerce.date().optional(),
+    expectedUpdatedAt: expectedUpdatedAtSchema,
+  })
+  .refine(
+    (value) =>
+      value.projectId !== undefined ||
+      value.userId !== undefined ||
+      value.category !== undefined ||
+      value.amount !== undefined ||
+      value.description !== undefined ||
+      value.expenseDate !== undefined,
+    { message: "هیچ تغییری برای ذخیره ارسال نشده است" },
+  );
+
+export type EditExpenseInput = z.infer<typeof editExpenseSchema>;
+
+/** DELETE / cancel: the requesting admin plus an optional reason and token. */
+export const deleteExpenseSchema = z.object({
+  requestingUserId: z.string().min(1, "شناسه کاربر درخواست‌دهنده الزامی است"),
+  reason: auditReasonSchema,
+  expectedUpdatedAt: expectedUpdatedAtSchema,
+});
+
+export type DeleteExpenseInput = z.infer<typeof deleteExpenseSchema>;
+
+/**
+ * The dashboard is behind the owner's session and has no per-person identity,
+ * so its correction routes carry only the optional reason and concurrency
+ * token; the audit records `actorType = ADMIN_DASHBOARD` with no user id.
+ */
+export const adminDeleteExpenseSchema = z.object({
+  reason: auditReasonSchema,
+  expectedUpdatedAt: expectedUpdatedAtSchema,
+});
+
+export const adminRestoreExpenseSchema = z.object({});
+
+export const restoreExpenseSchema = z.object({
+  requestingUserId: z.string().min(1, "شناسه کاربر درخواست‌دهنده الزامی است"),
+});
+
+export type RestoreExpenseInput = z.infer<typeof restoreExpenseSchema>;
+
+/** Same filters as the list, plus the deleted-only view for the dashboard. */
+export const deletedExpensesQuerySchema = z.object({
+  projectId: z.string().min(1).optional(),
+  page: z.coerce.number().int().min(1).default(1),
+  pageSize: z.coerce.number().int().min(1).max(MAX_PAGE_SIZE).default(DEFAULT_PAGE_SIZE),
+});

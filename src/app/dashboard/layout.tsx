@@ -1,7 +1,7 @@
 import type { ReactNode } from "react";
-import Link from "next/link";
+import { countPendingAccessRequests } from "@/core/access/service";
 import { isSessionValid } from "@/lib/auth";
-import { logout } from "./actions";
+import { DashboardNav } from "./dashboard-nav";
 import styles from "./dashboard.module.css";
 
 /**
@@ -10,6 +10,12 @@ import styles from "./dashboard.module.css";
  * The layout deliberately does **not** redirect: /dashboard/login lives inside
  * it, so a guard here would loop. `proxy.ts` turns away cookie-less visitors and
  * `requireSession()` in the page does the authoritative check.
+ *
+ * The chrome (header + mobile drawer) is a client component so the hamburger
+ * can open, trap focus and close on Escape; the session check stays here on the
+ * server and the login page therefore renders without any chrome. The pending
+ * access-request count is read here only when signed in, to badge the admin
+ * link in both the header and the drawer.
  */
 export default async function DashboardLayout({
   children,
@@ -17,31 +23,12 @@ export default async function DashboardLayout({
   children: ReactNode;
 }) {
   const signedIn = await isSessionValid();
+  const pendingRequests = signedIn ? await countPendingAccessRequests() : 0;
 
   return (
     <div className={styles.shell}>
-      {signedIn && (
-        <header className={styles.header}>
-          <div>
-            <div className={styles.title}>داشبورد مدیر</div>
-            <div className={styles.subtitle}>هزینه‌یار — گزارش هزینه‌های پروژه‌ها</div>
-          </div>
-          <div className={styles.headerActions}>
-            <Link href="/dashboard" className={styles.button}>
-              گزارش هزینه‌ها
-            </Link>
-            <Link href="/dashboard/admin" className={styles.button}>
-              مدیریت کاربران و پروژه‌ها
-            </Link>
-            <form action={logout}>
-              <button type="submit" className={styles.button}>
-                خروج
-              </button>
-            </form>
-          </div>
-        </header>
-      )}
-      {children}
+      {signedIn && <DashboardNav pendingRequests={pendingRequests} />}
+      <div className={styles.content}>{children}</div>
     </div>
   );
 }

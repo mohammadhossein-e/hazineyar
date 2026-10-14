@@ -32,3 +32,16 @@ export class ValidationError extends DomainError {
     this.name = "ValidationError";
   }
 }
+
+/**
+ * Raised when a write is refused because the row changed underneath the caller
+ * (optimistic concurrency). The dashboard sends the `updatedAt` it rendered;
+ * if it no longer matches, the edit is rejected instead of silently overwriting
+ * someone else's change.
+ */
+export class ConflictError extends DomainError {
+  constructor(message: string) {
+    super("CONFLICT", message);
+    this.name = "ConflictError";
+  }
+}

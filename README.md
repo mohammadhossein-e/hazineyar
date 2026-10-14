@@ -34,15 +34,22 @@ src/
       presenter.ts JSON-safe views (BigInt -> number)
     projects/      project lookups and creation
     users/         user lookup by (channel, externalId), project access
+    access/        access request queue (record, approve, reject, caps)
+    chats/         linked Telegram groups
+    settings/      bot runtime settings
+    notify.ts      notifier interface
     errors.ts      channel-agnostic domain errors
-  adapters/        channel adapters (empty for now; see adapters/README.md)
+  adapters/        channel adapters (Telegram bot + helpers)
   app/             Next.js routes, pages and API handlers (thin layer)
     api/expenses/  expense endpoints
     api/invoices/  uploaded invoice files
+    api/admin/     staff, access and settings endpoints
     api/health/    DB health check
   lib/             Prisma client, env config, jalali helpers, http + upload utils
 scripts/
   test-expenses.ts end-to-end check against a running dev server
+  test-bot.ts     Telegram adapter checks (bot + group mode + access requests)
+  test-admin.ts   admin routes + end-to-end flow + settings
 ```
 
 Rules:
@@ -108,6 +115,16 @@ otherwise.** The webhook route deliberately 404s unless `TELEGRAM_MODE` is
   Toman), `description?`, `invoiceFilePath?`, `invoiceNumber` (auto-generated,
   e.g. `invoice_001`), `expenseDate`, `createdAt`, `deletedAt` for soft delete.
   Indexed on `projectId`, `userId`, `category`, `expenseDate` and `deletedAt`.
+
+- **AccessRequest** — unknown Telegram users who asked for access: `channel`,
+  `externalId`, `displayName`, `username?`, `status` (`PENDING`/`APPROVED`/`REJECTED`),
+  `decidedAt?`, `createdAt`. Unique on `(channel, externalId)`, indexed on
+  `status`, `createdAt`.
+- **LinkedChat** — Telegram groups where the bot may announce expenses:
+  `channel`, `externalChatId`, `title?`, `createdAt`. Unique on
+  `(channel, externalChatId)`.
+- **Setting** — single JSON key/value store (e.g. `announcement` settings). Unique
+  on `key`.
 
 Expense categories are stored as the `ExpenseCategory` enum with Persian labels
 kept next to it in `src/core/expenses/categories.ts`:
@@ -372,8 +389,31 @@ reactivating restores the same rows and links. The dashboard's report page has a
 "نمایش پروژه‌ها و کاربران غیرفعال" checkbox so a closed project's history is
 still reportable.
 
-The UI posts JSON to the same routes, which are session-gated like the Excel
-export and can be scripted directly:
+- **Access requests** — unknown Telegram users can message `/start` or `/expense`
+  in the private chat to request access. A pending row appears on
+  `/dashboard/admin` for the owner to approve/reject. Approved users are created
+  through the same validation as the manual form and get a one-time notification
+  in Telegram; failures there don't undo approval. Rejections are sticky (no
+  re-queue). The queue is capped at 100 pending requests; overflow is answered
+  with a polite "busy" message. The panel shows display names (sanitized), optional
+  Telegram usernames and a "re-approve a rejected request" sub-list.
+- **Group mode** — admins of a linked Telegram group can run `/linkgroup` and
+  `/unlinkgroup` in the group. `/expense` in a linked group never runs the
+  multi-step flow there; instead it shows a deep link to the private chat
+  carrying a payload `g<absolute chat id>` (e.g. `g-100123...`). When a registered
+  user starts from that link the guided expense flow completes in private and
+  announces the result back to the linked group. An announcement is only sent if
+  the group is still linked at write time (re-checked), and any announcement
+  failure never rolls back the saved expense. Announcement behaviour is
+  configurable from `/dashboard/admin` → "تنظیمات اعلام در گروه":
+  - `announceMode`: `FULL` (user, project, category, amount, description, invoice
+    number), `MINIMAL` (just "ثبت شد: نام | پروژه"), `OFF`.
+  - `includeInvoice`: if true, the invoice file is sent as a document with the
+    text as its caption; otherwise the text is sent on its own.
+
+**Privacy note:** only `/expense` and `/start` are handled in private chats for
+existing/unknown users; group chatter is intentionally ignored. Deep link payloads
+are validated against currently linked chats.
 
 | Route | Purpose |
 | ----- | ------- |
@@ -384,6 +424,11 @@ export and can be scripted directly:
 | `POST /api/admin/users` | `{ name, externalId, role, projectIds }` |
 | `POST /api/admin/users/:id/status` | `{ isActive }` |
 | `POST /api/admin/users/:id/projects` | `{ projectIds }` — replaces the list |
+| `GET /api/admin/access-requests` | (used on /dashboard/admin) lists pending/rejected |
+| `POST /api/admin/access-requests/:id/approve` | `{ name?, role, projectIds }` — creates the user and notifies |
+| `POST /api/admin/access-requests/:id/reject` | rejects the request (sticky) |
+| `GET /api/admin/settings` | group announcement settings |
+| `POST /api/admin/settings` | `{ announceMode, includeInvoice }` |
 
 A duplicate active project name, a duplicate Telegram id, a non-numeric id, an
 unknown project and a blank field are all rejected server-side with a Persian
@@ -466,7 +511,23 @@ change.
    npm run test:admin
    ```
 
-4. **Bot check** — the Telegram adapter end to end against a stubbed API (no
+4. **Tests and test database** — tests run against `hazineyar_test` only. Set up:
+
+```bash
+npm run db:test:create
+npm run db:test:migrate
+```
+
+Run against test DB:
+```bash
+DATABASE_URL=postgresql://hazineyar:hazineyar@localhost:5432/hazineyar_test?schema=public npx tsx scripts/test-bot.ts
+DATABASE_URL=postgresql://hazineyar:hazineyar@localhost:5432/hazineyar_test?schema=public npx tsx scripts/test-expenses.ts
+DATABASE_URL=postgresql://hazineyar:hazineyar@localhost:5432/hazineyar_test?schema=public npx tsx scripts/test-admin.ts
+```
+Scripts refuse to run if DB name does not end with `_test`. Verify dev DB unchanged via `scripts/db-check-dev.ts`.
+
+
+**Bot check** — the Telegram adapter end to end against a stubbed API (no
    token, no network), including deactivated users and projects:
 
    ```bash

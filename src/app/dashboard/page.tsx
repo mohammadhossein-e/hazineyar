@@ -2,10 +2,16 @@ import Link from "next/link";
 import { ALL_CATEGORIES, CATEGORY_LABELS } from "@/core/expenses/categories";
 import { listExpensesQuerySchema } from "@/core/expenses/schemas";
 import { presentExpenses, presentSummary } from "@/core/expenses/presenter";
-import { getExpenseSummary, listExpenses } from "@/core/expenses/service";
+import { getEditedExpenseIds } from "@/core/expenses/audit";
+import {
+  getExpenseSummary,
+  listDeletedExpenses,
+  listExpenses,
+} from "@/core/expenses/service";
 import { listProjects, listAllProjects } from "@/core/projects/service";
 import { listUsers, listAllUsers } from "@/core/users/service";
 import { requireSession } from "@/lib/auth";
+import { ExpenseActions } from "./expense-actions";
 import { FilterBar } from "./filter-bar";
 import styles from "./dashboard.module.css";
 
@@ -57,13 +63,14 @@ type Filters = {
   to?: string;
   page?: number;
   all?: string;
+  deleted?: string;
 };
 
 /** Keeps the project filter even when empty: "" is the "all projects" view. */
 function dashboardHref(filters: Filters): string {
   const params = new URLSearchParams();
   params.set("project", filters.project);
-  for (const key of ["category", "user", "from", "to", "all"] as const) {
+  for (const key of ["category", "user", "from", "to", "all", "deleted"] as const) {
     if (filters[key]) params.set(key, filters[key]!);
   }
   if (filters.page && filters.page > 1) params.set("page", String(filters.page));
@@ -118,6 +125,7 @@ export default async function DashboardPage({
   const from = dateParam(single(query.from), false);
   const to = dateParam(single(query.to), true);
   const page = Math.max(1, Number(single(query.page)) || 1);
+  const showDeleted = single(query.deleted) === "1";
 
   const candidate = {
     ...(selected ? { projectId: selected.id } : {}),
@@ -147,14 +155,31 @@ export default async function DashboardPage({
       }
     : { page: 1, pageSize: PAGE_SIZE };
 
-  let result = await listExpenses(serviceQuery);
+  // The deleted view is a separate, project-scoped list of soft-deleted rows;
+  // every other view keeps excluding them exactly as before.
+  let result = showDeleted
+    ? await listDeletedExpenses({
+        projectId: selected?.id,
+        page,
+        pageSize: PAGE_SIZE,
+      })
+    : await listExpenses(serviceQuery);
   // A ?page=99 beyond the end reads as "no results"; show the last real page.
   if (result.total > 0 && result.page > result.totalPages) {
-    result = await listExpenses({ ...serviceQuery, page: result.totalPages });
+    result = showDeleted
+      ? await listDeletedExpenses({
+          projectId: selected?.id,
+          page: result.totalPages,
+          pageSize: PAGE_SIZE,
+        })
+      : await listExpenses({ ...serviceQuery, page: result.totalPages });
   }
 
   const expenses = presentExpenses(result.items);
-  // No selected project ("همه پروژه‌ها") aggregates across every project.
+  const editedIds = await getEditedExpenseIds(result.items.map((e) => e.id));
+  const projectOptions = projects.map((p) => ({ id: p.id, name: p.name }));
+  const userOptions = users.map((u) => ({ id: u.id, name: u.name }));
+  // No selected project ("همه پروژهها") aggregates across every project.
   const summary = presentSummary(await getExpenseSummary(selected?.id));
 
   const current: Filters = {
@@ -164,12 +189,13 @@ export default async function DashboardPage({
     from: from.state === "absent" ? "" : single(query.from),
     to: to.state === "absent" ? "" : single(query.to),
     all: showInactive ? "1" : "",
+    deleted: showDeleted ? "1" : "",
   };
 
   const statCards = [
-    { label: "امروز", value: summary.today, period: summary.periods.today },
-    { label: "این هفته", value: summary.thisWeek, period: summary.periods.thisWeek },
-    { label: "این ماه", value: summary.thisMonth, period: summary.periods.thisMonth },
+    { label: "امروز", metric: "today", value: summary.today, period: summary.periods.today },
+    { label: "این هفته", metric: "week", value: summary.thisWeek, period: summary.periods.thisWeek },
+    { label: "این ماه", metric: "month", value: summary.thisMonth, period: summary.periods.thisMonth },
   ];
 
   return (
@@ -191,16 +217,50 @@ export default async function DashboardPage({
         </p>
       )}
 
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          gap: "0.75rem",
+          flexWrap: "wrap",
+        }}
+      >
+        <span className={styles.muted}>
+          {showDeleted
+            ? "نمایش هزینه‌های حذف‌شده"
+            : "فقط هزینه‌های فعال نمایش داده می‌شوند"}
+        </span>
+        <Link
+          className={styles.button}
+          href={dashboardHref({
+            ...current,
+            page: undefined,
+            deleted: showDeleted ? "" : "1",
+          })}
+        >
+          {showDeleted ? "نمایش هزینه‌های فعال" : "نمایش حذف‌شده‌ها"}
+        </Link>
+      </div>
+
       <section className={styles.stats}>
         {statCards.map((card) => (
-          <div key={card.label} className={styles.stat}>
-            <span className={styles.statLabel}>{card.label}</span>
-            <span className={styles.statAmount}>
-              {formatToman(card.value.total)} تومان
-            </span>
-            <span className={styles.statMeta}>
-              {card.value.count} مورد — از {card.period.fromJalali}
-            </span>
+          <div
+            key={card.label}
+            className={styles.stat}
+            data-testid="stat-card"
+            data-metric={card.metric}
+          >
+            <div className={styles.statHeading}>
+              <span className={styles.statLabel}>{card.label}</span>
+              <span className={styles.statPeriod}>از {card.period.fromJalali}</span>
+            </div>
+            <div className={styles.statFigures}>
+              <span className={styles.statAmount}>
+                {formatToman(card.value.total)} تومان
+              </span>
+              <span className={styles.statCount}>{card.value.count} مورد</span>
+            </div>
           </div>
         ))}
       </section>
@@ -217,41 +277,98 @@ export default async function DashboardPage({
               <th>ثبت‌کننده</th>
               <th>توضیحات</th>
               <th>فاکتور</th>
+              <th>عملیات</th>
             </tr>
           </thead>
           <tbody>
             {expenses.length === 0 ? (
               <tr>
-                <td colSpan={8} className={styles.empty}>
-                  هزینه‌ای با این فیلترها یافت نشد.
+                <td colSpan={9} className={styles.empty}>
+                  {showDeleted
+                    ? "هزینه حذف‌شده‌ای یافت نشد."
+                    : "هزینه‌ای با این فیلترها یافت نشد."}
                 </td>
               </tr>
             ) : (
-              expenses.map((expense) => (
-                <tr key={expense.id}>
-                  <td>{expense.invoiceNumber}</td>
-                  <td title={expense.expenseDate}>{expense.expenseDateJalali}</td>
-                  <td>{expense.projectName ?? "—"}</td>
-                  <td>{expense.categoryLabel}</td>
-                  <td className={styles.amount}>{formatToman(expense.amount)}</td>
-                  <td>{expense.userName ?? "—"}</td>
-                  <td className={styles.wrap}>{expense.description ?? "—"}</td>
-                  <td>
-                    {expense.invoiceUrl ? (
-                      <a
-                        href={expense.invoiceUrl}
-                        className={styles.invoiceLink}
-                        target="_blank"
-                        rel="noreferrer"
-                      >
-                        دریافت
-                      </a>
-                    ) : (
-                      <span className={styles.muted}>—</span>
-                    )}
-                  </td>
-                </tr>
-              ))
+              expenses.map((expense) => {
+                const isEdited = editedIds.has(expense.id);
+                const rowProjects = projectOptions.some(
+                  (p) => p.id === expense.projectId,
+                )
+                  ? projectOptions
+                  : [
+                      { id: expense.projectId, name: expense.projectName ?? "—" },
+                      ...projectOptions,
+                    ];
+                const rowUsers = userOptions.some(
+                  (u) => u.id === expense.userId,
+                )
+                  ? userOptions
+                  : [
+                      { id: expense.userId, name: expense.userName ?? "—" },
+                      ...userOptions,
+                    ];
+                return (
+                  <tr key={expense.id}>
+                    <td data-label="شماره فاکتور">
+                      {expense.invoiceNumber}
+                      {isEdited && (
+                        <span className={`${styles.badge} ${styles.badgeEdited}`}>
+                          ویرایش‌شده
+                        </span>
+                      )}
+                    </td>
+                    <td data-label="تاریخ" title={expense.expenseDate}>
+                      {expense.expenseDateJalali}
+                    </td>
+                    <td data-label="پروژه">{expense.projectName ?? "—"}</td>
+                    <td data-label="دسته‌بندی">{expense.categoryLabel}</td>
+                    <td data-label="مبلغ (تومان)" className={styles.amount}>
+                      {formatToman(expense.amount)}
+                    </td>
+                    <td data-label="ثبت‌کننده">{expense.userName ?? "—"}</td>
+                    <td data-label="توضیحات" className={styles.wrap}>
+                      {expense.description ?? "—"}
+                      {showDeleted && expense.deletedReason && (
+                        <span className={styles.muted}>
+                          {" "}
+                          — دلیل حذف: {expense.deletedReason}
+                        </span>
+                      )}
+                    </td>
+                    <td data-label="فاکتور">
+                      {expense.invoiceUrl ? (
+                        <a
+                          href={expense.invoiceUrl}
+                          className={styles.invoiceLink}
+                          target="_blank"
+                          rel="noreferrer"
+                        >
+                          دریافت
+                        </a>
+                      ) : (
+                        <span className={styles.muted}>—</span>
+                      )}
+                    </td>
+                    <td data-label="عملیات">
+                      <ExpenseActions
+                        expense={{
+                          id: expense.id,
+                          projectId: expense.projectId,
+                          userId: expense.userId,
+                          category: expense.category,
+                          amount: expense.amount,
+                          description: expense.description,
+                          updatedAt: expense.updatedAt,
+                        }}
+                        projects={rowProjects}
+                        users={rowUsers}
+                        deleted={showDeleted}
+                      />
+                    </td>
+                  </tr>
+                );
+              })
             )}
           </tbody>
         </table>

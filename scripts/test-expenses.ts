@@ -11,8 +11,11 @@
  * HTTP API through create -> list -> filter -> summary -> upload -> delete.
  * No test framework is involved on purpose.
  */
-import "dotenv/config";
+import "./test-env";
+
 import { createHmac } from "node:crypto";
+import { readFileSync } from "node:fs";
+import path from "node:path";
 import { PrismaClient } from "@prisma/client";
 import { PrismaPg } from "@prisma/adapter-pg";
 import ExcelJS from "exceljs";
@@ -55,6 +58,45 @@ function check(label: string, condition: boolean, detail?: unknown) {
 
 function section(title: string) {
   console.log(`\n${title}`);
+}
+
+/** `invoice_001`, `invoice_1000`: the numbering format the app promises. */
+function padded(n: number): string {
+  return `invoice_${String(n).padStart(3, "0")}`;
+}
+
+/** Parses the numeric part of a well-formed invoice number, else null. */
+function parseInvoiceSuffix(value: unknown): number | null {
+  const match = /^invoice_(\d{1,9})$/.exec(String(value ?? ""));
+  return match ? Number(match[1]) : null;
+}
+
+/** Highest numeric invoice suffix in use for a project (deleted rows included). */
+async function maxInvoiceSuffix(projectId: string): Promise<number> {
+  const rows = await prisma.expense.findMany({
+    where: { projectId },
+    select: { invoiceNumber: true },
+  });
+  return rows.reduce(
+    (max, row) => Math.max(max, parseInvoiceSuffix(row.invoiceNumber) ?? 0),
+    0,
+  );
+}
+
+/**
+ * The server's "today" as a bare `YYYY-MM-DD` calendar date, in the machine's
+ * local timezone (the app treats `expenseDate` as a calendar date and derives
+ * its day ranges from the server's local day). Sending an instant such as
+ * `new Date().toISOString()` would land on the previous UTC day between
+ * midnight and the timezone offset, so the summary's "today" bucket would miss
+ * it. A bare date is parsed as UTC midnight and matches the local day's range.
+ */
+function todayDateOnly(ref: Date = new Date()): string {
+  return [
+    ref.getFullYear(),
+    String(ref.getMonth() + 1).padStart(2, "0"),
+    String(ref.getDate()).padStart(2, "0"),
+  ].join("-");
 }
 
 /**
@@ -152,13 +194,11 @@ async function main() {
   // ---------------------------------------------------------------- create
   section("Create expense");
   {
-    // Numbering is count-based and sequential **per project**, counting every
-    // row ever made for the project (soft-deleted ones included). The DB count
-    // is therefore the exact expected number, independent of earlier test runs
-    // that left rows behind.
-    const saadTotal = await prisma.expense.count({ where: { projectId: P.saadatabad } });
-    const vankTotal = await prisma.expense.count({ where: { projectId: P.vank } });
-    const padded = (n: number) => `invoice_${String(n).padStart(3, "0")}`;
+    // Numbering continues from the project's highest existing number (never the
+    // row count), counting deleted rows too, so it is stable across runs that
+    // leave rows behind even when numbers are not contiguous.
+    const saadMax = await maxInvoiceSuffix(P.saadatabad);
+    const vankMax = await maxInvoiceSuffix(P.vank);
 
     const { status, json } = await api("POST", "/api/expenses", {
       projectId: P.saadatabad,
@@ -166,7 +206,7 @@ async function main() {
       category: "MATERIALS",
       amount: 1_250_000,
       description: "سیمان و میلگرد",
-      expenseDate: new Date().toISOString(),
+      expenseDate: todayDateOnly(),
     });
     check("POST /api/expenses -> 201", status === 201, json);
     check("returns amount as a number", typeof json?.amount === "number", json);
@@ -176,10 +216,16 @@ async function main() {
 
     createdExpenseId = json?.id ?? null;
     check("has an id", !!createdExpenseId, json);
+
+    // The counter can sit ahead of the surviving rows when numbers were
+    // consumed and their rows later hard-deleted (other suites do this), so the
+    // guarantee here is "strictly past every existing number", not "exactly
+    // max+1". Never reusing a number is the whole point.
+    const firstSuffix = parseInvoiceSuffix(json?.invoiceNumber);
     check(
-      "first invoice number follows the existing project count",
-      json?.invoiceNumber === padded(saadTotal + 1),
-      { got: json?.invoiceNumber, want: saadTotal + 1 },
+      "first invoice number continues past the project's highest existing number",
+      firstSuffix !== null && firstSuffix > saadMax,
+      { got: json?.invoiceNumber, highestExisting: saadMax },
     );
 
     // Sequential, per project.
@@ -188,28 +234,186 @@ async function main() {
       userId: reza,
       category: "WAGES",
       amount: 500_000,
-      expenseDate: new Date().toISOString(),
+      expenseDate: todayDateOnly(),
     });
+    const secondSuffix = parseInvoiceSuffix(second.json?.invoiceNumber);
     check(
       "invoice numbers increment per project within this run",
-      json?.invoiceNumber === padded(saadTotal + 1) &&
-        second.json?.invoiceNumber === padded(saadTotal + 2),
+      firstSuffix !== null && secondSuffix === firstSuffix + 1,
       { first: json?.invoiceNumber, second: second.json?.invoiceNumber },
     );
 
-    // Another project restarts the sequence from its own count.
+    // Another project continues past its own highest number.
     const otherProject = await api("POST", "/api/expenses", {
       projectId: P.vank,
       userId: ali,
       category: "TRANSPORT",
       amount: 300_000,
-      expenseDate: new Date().toISOString(),
+      expenseDate: todayDateOnly(),
     });
     check(
-      "other project restarts its own sequence",
-      otherProject.json?.invoiceNumber === padded(vankTotal + 1),
-      { got: otherProject.json?.invoiceNumber, want: vankTotal + 1 },
+      "other project continues past its own highest existing number",
+      (parseInvoiceSuffix(otherProject.json?.invoiceNumber) ?? 0) > vankMax,
+      { got: otherProject.json?.invoiceNumber, highestExisting: vankMax },
     );
+  }
+
+  // ------------------------------------------------------- invoice numbering
+  section("Invoice numbering");
+  {
+    const numberingProjects: string[] = [];
+    /** A throwaway active project, tracked for cleanup. */
+    const makeProject = async (label: string): Promise<string> => {
+      const project = await prisma.project.create({
+        data: { name: `شماره‌گذاری ${label} ${Date.now()}-${numberingProjects.length}` },
+      });
+      numberingProjects.push(project.id);
+      return project.id;
+    };
+    /** A row written directly, bypassing createExpense (fixture/history). */
+    const insertRaw = (projectId: string, invoiceNumber: string) =>
+      prisma.expense.create({
+        data: {
+          projectId,
+          userId: admin,
+          category: "OTHER",
+          amount: 1000n,
+          invoiceNumber,
+          expenseDate: new Date(),
+        },
+      });
+    const post = (projectId: string) =>
+      api("POST", "/api/expenses", {
+        projectId,
+        userId: admin,
+        category: "OTHER",
+        amount: 1000,
+        expenseDate: todayDateOnly(),
+      });
+
+    // (1) count < max: continuation comes from the maximum, not the count.
+    const sparse = await makeProject("sparse");
+    await insertRaw(sparse, "invoice_001");
+    await insertRaw(sparse, "invoice_002");
+    await insertRaw(sparse, "invoice_005");
+    await insertRaw(sparse, "garbage"); // malformed
+    await insertRaw(sparse, "invoice_"); // malformed
+    await insertRaw(sparse, "invoice_1a"); // malformed
+    await insertRaw(sparse, "invoice_0000000000"); // 10 digits -> ignored
+    const sparseCount = await prisma.expense.count({ where: { projectId: sparse } });
+    const sparseCreate = await post(sparse);
+    check(
+      "non-contiguous numbers continue from the maximum, not the count",
+      sparseCreate.status === 201 && sparseCreate.json?.invoiceNumber === padded(6),
+      { status: sparseCreate.status, count: sparseCount, got: sparseCreate.json?.invoiceNumber },
+    );
+
+    // (2) A soft-deleted number is never reused.
+    const softDeleted = await api(
+      "DELETE",
+      `/api/expenses/${sparseCreate.json?.id}?requestingUserId=${admin}`,
+    );
+    const afterSoftDelete = await post(sparse);
+    check(
+      "a soft-deleted number is not reused",
+      softDeleted.status === 200 && afterSoftDelete.json?.invoiceNumber === padded(7),
+      { deleteStatus: softDeleted.status, got: afterSoftDelete.json?.invoiceNumber },
+    );
+
+    // (3) A hard-deleted number is not reused either.
+    await prisma.expense.delete({ where: { id: afterSoftDelete.json?.id } });
+    const afterHardDelete = await post(sparse);
+    check(
+      "a hard-deleted number is not reused",
+      afterHardDelete.json?.invoiceNumber === padded(8),
+      { got: afterHardDelete.json?.invoiceNumber },
+    );
+
+    // (4) A history of only malformed values still starts at invoice_001.
+    const malformed = await makeProject("malformed");
+    await insertRaw(malformed, "invoice_x");
+    await insertRaw(malformed, "foo_1");
+    await insertRaw(malformed, "invoice_");
+    const malformedCreate = await post(malformed);
+    check(
+      "malformed invoice numbers are ignored, so numbering starts at 1",
+      malformedCreate.status === 201 && malformedCreate.json?.invoiceNumber === padded(1),
+      { status: malformedCreate.status, got: malformedCreate.json?.invoiceNumber },
+    );
+
+    // (5) Concurrency: 20 simultaneous creates on one project, zero failures
+    // and 20 distinct sequential numbers.
+    const concurrent = await makeProject("concurrent");
+    const results = await Promise.all(
+      Array.from({ length: 20 }, () => post(concurrent)),
+    );
+    const ok = results.filter((r) => r.status === 201);
+    const numbers = ok
+      .map((r) => parseInvoiceSuffix(r.json?.invoiceNumber))
+      .filter((n): n is number => n !== null);
+    const sorted = [...numbers].sort((a, b) => a - b);
+    check("20 concurrent creates all succeed", ok.length === 20, results.map((r) => r.status));
+    check("20 concurrent creates produce distinct numbers", new Set(numbers).size === 20, numbers);
+    check(
+      "20 concurrent creates are sequential from 1",
+      JSON.stringify(sorted) === JSON.stringify(Array.from({ length: 20 }, (_, i) => i + 1)),
+      sorted,
+    );
+
+    // (6) The migration's own seed statement reproduces the maximum for every
+    // project on the existing data (malformed values ignored, deleted included).
+    const seedFixture = await makeProject("seed");
+    await insertRaw(seedFixture, "invoice_001");
+    await insertRaw(seedFixture, "invoice_002");
+    await insertRaw(seedFixture, "invoice_005");
+    await insertRaw(seedFixture, "invoice_009");
+    await insertRaw(seedFixture, "not-a-number");
+
+    const migrationPath = path.resolve(
+      process.cwd(),
+      "prisma/migrations/20261013000000_project_invoice_counter/migration.sql",
+    );
+    const seedStatement = readFileSync(migrationPath, "utf8")
+      .split("\n")
+      .filter((line) => !line.trim().startsWith("--"))
+      .join("\n")
+      .split(";")
+      .map((statement) => statement.trim())
+      .find((statement) => statement.startsWith('INSERT INTO "ProjectInvoiceCounter"'));
+
+    await prisma.projectInvoiceCounter.deleteMany({});
+    if (seedStatement) await prisma.$executeRawUnsafe(seedStatement);
+
+    const groups = await prisma.expense.findMany({
+      select: { projectId: true },
+      distinct: ["projectId"],
+    });
+    let seededAll = !!seedStatement && groups.length > 0;
+    for (const { projectId } of groups) {
+      const counter = await prisma.projectInvoiceCounter.findUnique({ where: { projectId } });
+      const expected = await maxInvoiceSuffix(projectId);
+      if (counter?.lastNumber !== expected) {
+        seededAll = false;
+        console.error(
+          `        seed mismatch for ${projectId}: counter=${counter?.lastNumber} max=${expected}`,
+        );
+      }
+    }
+    const seedCounter = await prisma.projectInvoiceCounter.findUnique({
+      where: { projectId: seedFixture },
+    });
+    check(
+      "the migration seed sets each counter to the project's existing maximum",
+      seededAll && seedCounter?.lastNumber === 9,
+      { seededAll, seedCounter: seedCounter?.lastNumber },
+    );
+
+    // Cleanup so repeated runs do not accumulate numbering fixtures.
+    for (const projectId of numberingProjects) {
+      await prisma.expense.deleteMany({ where: { projectId } });
+      await prisma.projectInvoiceCounter.deleteMany({ where: { projectId } });
+      await prisma.project.delete({ where: { id: projectId } }).catch(() => {});
+    }
   }
 
   // ------------------------------------------------------------ validation
@@ -220,7 +424,7 @@ async function main() {
       userId: reza,
       category: "NOPE",
       amount: 1000,
-      expenseDate: new Date().toISOString(),
+      expenseDate: todayDateOnly(),
     });
     check("unknown category -> 400", badCategory.status === 400, badCategory.json);
     check("error shape has message + code", !!badCategory.json?.error?.message && !!badCategory.json?.error?.code, badCategory.json);
@@ -231,7 +435,7 @@ async function main() {
       userId: reza,
       category: "WAGES",
       amount: 1000.5,
-      expenseDate: new Date().toISOString(),
+      expenseDate: todayDateOnly(),
     });
     check("decimal amount -> 400", decimal.status === 400, decimal.json);
 
@@ -240,7 +444,7 @@ async function main() {
       userId: reza,
       category: "WAGES",
       amount: -5,
-      expenseDate: new Date().toISOString(),
+      expenseDate: todayDateOnly(),
     });
     check("negative amount -> 400", negative.status === 400, negative.json);
 
@@ -250,7 +454,7 @@ async function main() {
       userId: ali,
       category: "TOOLS",
       amount: 1000,
-      expenseDate: new Date().toISOString(),
+      expenseDate: todayDateOnly(),
     });
     check("employee on a project they are not linked to -> 403", forbidden.status === 403, forbidden.json);
 
@@ -259,7 +463,7 @@ async function main() {
       userId: admin,
       category: "WORKER_FOOD",
       amount: 200_000,
-      expenseDate: new Date().toISOString(),
+      expenseDate: todayDateOnly(),
     });
     check("admin can record on any project -> 201", adminOnAny.status === 201, adminOnAny.json);
 
@@ -268,7 +472,7 @@ async function main() {
       userId: admin,
       category: "OTHER",
       amount: 1000,
-      expenseDate: new Date().toISOString(),
+      expenseDate: todayDateOnly(),
     });
     check("unknown project -> 404", missingProject.status === 404, missingProject.json);
 
@@ -295,7 +499,7 @@ async function main() {
       userId: reza,
       category: "MATERIALS",
       amount: 9_500_000_000,
-      expenseDate: new Date().toISOString(),
+      expenseDate: todayDateOnly(),
     });
     check("multi-billion amount -> 201", big.status === 201, big.json);
     check("large amount round-trips exactly", big.json?.amount === 9_500_000_000, big.json?.amount);
@@ -309,7 +513,7 @@ async function main() {
         userId: reza,
         category: "MATERIALS",
         amount: 1000,
-        expenseDate: new Date().toISOString(),
+        expenseDate: todayDateOnly(),
       }),
     });
     check("POST /api/expenses without a session -> 401", noSessionPost.status === 401, noSessionPost.status);
@@ -377,7 +581,7 @@ async function main() {
       byUser.json?.items?.map((e: any) => e.userId),
     );
 
-    const todayStr = new Date().toISOString().slice(0, 10);
+    const todayStr = todayDateOnly();
     const byDate = await api(
       "GET",
       `/api/expenses?projectId=${P.saadatabad}&dateFrom=${todayStr}&dateTo=${todayStr}`,
@@ -482,7 +686,7 @@ async function main() {
       userId: reza,
       category: "OTHER",
       amount: 42_000,
-      expenseDate: new Date().toISOString(),
+      expenseDate: todayDateOnly(),
     });
     const targetId = fresh.json?.id as string;
     check("created a dedicated expense -> 201", fresh.status === 201, fresh.json);
@@ -518,7 +722,7 @@ async function main() {
       list.json?.items?.map((e: any) => e.id),
     );
 
-    const stillInDb = await prisma.expense.findUnique({ where: { id: targetId } });
+    const stillInDb = targetId ? await prisma.expense.findUnique({ where: { id: targetId } }) : null;
     check("row is kept in the database (soft delete)", !!stillInDb?.deletedAt, stillInDb?.deletedAt);
 
     const summaryAfter = await api("GET", "/api/expenses/summary");
