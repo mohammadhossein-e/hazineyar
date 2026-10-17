@@ -1,13 +1,7 @@
-import type { User } from "@prisma/client";
-import { getUserByChannel } from "@/core/users/service";
+import { createUserFinder } from "../user";
 
 /**
- * Telegram users are matched by their immutable numeric id. A Telegram id is
- * never registered on the fly: an unknown id means the admin has not granted
- * access yet, and the bot says so instead of creating a row.
+ * Telegram user lookup. The (channel, externalId) matching lives in the shared
+ * `createUserFinder`; this keeps the original `findTelegramUser` name.
  */
-export async function findTelegramUser(
-  telegramUserId: number,
-): Promise<User | null> {
-  return getUserByChannel("telegram", String(telegramUserId));
-}
+export const findTelegramUser = createUserFinder("telegram");

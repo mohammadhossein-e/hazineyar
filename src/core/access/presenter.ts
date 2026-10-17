@@ -1,5 +1,6 @@
 import type { AccessRequest } from "@prisma/client";
 import { formatJalali } from "@/lib/jalali";
+import { channelLabel } from "../channels";
 
 const STATUS_LABELS = {
   PENDING: "در انتظار",
@@ -18,6 +19,7 @@ export function presentAccessRequest(request: AccessRequest) {
   return {
     id: request.id,
     channel: request.channel,
+    channelLabel: channelLabel(request.channel),
     externalId: request.externalId,
     displayName: request.displayName,
     username: request.username,

@@ -1,5 +1,8 @@
 import { Prisma, type Role } from "@prisma/client";
 import { prisma } from "@/lib/db";
+import { config } from "@/lib/config";
+import { redactValue } from "@/lib/redact";
+import { toChannelId } from "../channels";
 import { NotFoundError, ValidationError } from "../errors";
 import type { Notifier } from "../notify";
 import { createStaffUser, duplicateNameWarning } from "../users/service";
@@ -28,7 +31,7 @@ export function sanitizeDisplayName(value: string): string {
     .replace(/[\u0000-\u001f\u007f]/g, " ")
     .replace(/\s+/g, " ")
     .trim();
-  return cleaned.slice(0, MAX_DISPLAY_NAME_LENGTH) || "کاربر تلگرام";
+  return cleaned.slice(0, MAX_DISPLAY_NAME_LENGTH) || "کاربر";
 }
 
 /** Usernames are optional and normalized to the bare handle, without `@`. */
@@ -110,6 +113,11 @@ export async function recordAccessRequest(input: {
   return "requested";
 }
 
+/** A single request by id, or null. Used to route the approval notice. */
+export async function getAccessRequestById(id: string) {
+  return prisma.accessRequest.findUnique({ where: { id } });
+}
+
 export async function listPendingAccessRequests() {
   return prisma.accessRequest.findMany({
     where: { status: "PENDING" },
@@ -166,10 +174,12 @@ export async function approveAccessRequest(
     throw new ValidationError("این درخواست قبلاً تایید شده است");
   }
 
-  // The manager's chosen name wins; the recorded Telegram display name is only
-  // the fallback (and stays on the request for reference).
+  // The manager's chosen name wins; the recorded display name is only the
+  // fallback (and stays on the request for reference). The account is created
+  // on the network the request actually came from, so the bot can resolve it.
   const user = await createStaffUser({
     name: input.name?.trim() || request.displayName,
+    channel: toChannelId(request.channel),
     externalId: request.externalId,
     role: input.role,
     projectIds: input.projectIds,
@@ -191,7 +201,7 @@ export async function approveAccessRequest(
     } catch (error) {
       console.warn(
         `[access] could not notify ${request.externalId} after approval:`,
-        error,
+        redactValue(error, config.secretTokens),
       );
     }
   }

@@ -85,28 +85,28 @@ async function assertProjectsExist(projectIds: string[]): Promise<void> {
 }
 
 /**
- * Creates a staff account the bot can immediately resolve. Telegram is the only
- * adapter, so the channel is fixed here rather than asked for.
+ * Creates a staff account the bot can immediately resolve on its channel.
  *
- * A repeated Telegram id is refused up front with a readable message: the bot
- * looks users up by (channel, externalId), so a duplicate would silently make
- * the new row unreachable and the old name would be used instead.
+ * A repeated (channel, externalId) is refused up front with a readable message:
+ * the bot looks users up by that pair, so a duplicate would silently make the
+ * new row unreachable and the old name would be used instead. The same id is
+ * fine on a *different* channel, which is why the check is scoped to one.
  */
 export async function createStaffUser(input: CreateStaffUserInput) {
   const data = createUserSchema.parse(input);
   await assertProjectsExist(data.projectIds);
 
-  const existing = await getUserByChannel("telegram", data.externalId);
+  const existing = await getUserByChannel(data.channel, data.externalId);
   if (existing) {
     throw new ValidationError(
-      "کاربری با این شناسه تلگرام از قبل ثبت شده است؛ همان کاربر را ویرایش کنید",
+      "کاربری با این شناسه در این پیام‌رسان از قبل ثبت شده است؛ همان کاربر را ویرایش کنید",
     );
   }
 
   return prisma.user.create({
     data: {
       name: data.name,
-      channel: "telegram",
+      channel: data.channel,
       externalId: data.externalId,
       role: data.role,
       userProjects: { create: data.projectIds.map((projectId) => ({ projectId })) },

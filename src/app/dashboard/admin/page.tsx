@@ -14,8 +14,12 @@ import { getCancellationSettings } from "@/core/settings/service";
 import { presentUsers } from "@/core/users/presenter";
 import { listAllUsers } from "@/core/users/service";
 import { requireSession } from "@/lib/auth";
+import { config } from "@/lib/config";
+import { qrCodeDataUrl } from "@/lib/qr";
+import { CHANNELS } from "@/adapters/channel";
 import styles from "../dashboard.module.css";
 import { JsonForm } from "./admin-forms";
+import { OnboardingCard } from "./onboarding-card";
 
 /** Latin digits with thousands separators, like the expense table. */
 const formatToman = (value: number) => value.toLocaleString("en-US");
@@ -47,8 +51,56 @@ export default async function AdminPage() {
   const pending = presentAccessRequests(pendingRequests);
   const rejected = presentAccessRequests(rejectedRequests);
 
+  // One onboarding card per configured network. A channel with no bot username
+  // set has nothing to link to, so it is reported as "not configured" instead.
+  const onboarding = await Promise.all(
+    CHANNELS.map(async (channel) => {
+      if (!channel.botUsername) return { channel, link: null, qr: null };
+      const link = channel.chatLink(channel.botUsername);
+      return { channel, link, qr: await qrCodeDataUrl(link) };
+    }),
+  );
+
   return (
     <main style={{ display: "flex", flexDirection: "column", gap: "1.5rem" }}>
+      <section className={`${styles.section} ${styles.printCard}`}>
+        <div className={`${styles.sectionHeader} ${styles.noPrint}`}>
+          <h2 className={styles.panelTitle}>ورود کارمندان به ربات</h2>
+        </div>
+        <div className={styles.qrCards}>
+          {onboarding.map(({ channel, link, qr }) =>
+            link && qr ? (
+              <OnboardingCard
+                key={channel.id}
+                channelId={channel.id}
+                label={channel.label}
+                link={link}
+                qr={qr}
+              />
+            ) : (
+              <div
+                key={channel.id}
+                className={styles.qrCard}
+                data-testid={`onboarding-${channel.id}-missing`}
+              >
+                <div className={styles.qrCardBody}>
+                  <h3 className={styles.qrCardTitle}>{channel.label}</h3>
+                  <p className={styles.hint}>
+                    نام کاربری ربات این پیام‌رسان تنظیم نشده است؛ برای ساخت لینک
+                    و کد QR، متغیر محیطی مربوطه را در فایل .env قرار دهید.
+                  </p>
+                </div>
+              </div>
+            ),
+          )}
+        </div>
+        <p className={`${styles.hint} ${styles.noPrint}`}>
+          لینک و کد QR هر پیام‌رسان را در اختیار کارمندان بگذارید تا با باز کردن
+          آن، چت خصوصی ربات «{config.publicAppName}» باز شود و از آن‌جا درخواست
+          دسترسی ثبت و در فهرست زیر نمایش داده شود.
+        </p>
+      </section>
+
       <section className={styles.section}>
         <div className={styles.sectionHeader}>
           <h2 className={styles.panelTitle}>درخواست‌های دسترسی</h2>
@@ -65,7 +117,8 @@ export default async function AdminPage() {
               <thead>
                 <tr>
                   <th>نام</th>
-                  <th>نام کاربری تلگرام</th>
+                  <th>پیام‌رسان</th>
+                  <th>نام کاربری</th>
                   <th>تاریخ درخواست</th>
                   <th>عملیات</th>
                 </tr>
@@ -74,7 +127,8 @@ export default async function AdminPage() {
                 {pending.map((request) => (
                   <tr key={request.id}>
                     <td data-label="نام">{request.displayName}</td>
-                    <td data-label="نام کاربری تلگرام">
+                    <td data-label="پیام‌رسان">{request.channelLabel}</td>
+                    <td data-label="نام کاربری">
                       {request.username ? (
                         `@${request.username}`
                       ) : (
@@ -151,10 +205,10 @@ export default async function AdminPage() {
         )}
 
         <p className={styles.hint}>
-          کاربران ناشناس تلگرام که در چت خصوصی ربات دستور /start را می‌زنند
-          اینجا فهرست می‌شوند. با «تایید» حساب ساخته می‌شود و به کاربر در
-          تلگرام اطلاع داده می‌شود؛ «رد» تا زمانی که خودتان تصمیم را عوض
-          نکنید باقی می‌ماند.
+          کاربران ناشناسی که در چت خصوصی ربات دستور /start را می‌زنند اینجا
+          فهرست می‌شوند. با «تایید» حساب روی همان پیام‌رسان ساخته می‌شود و به
+          کاربر در همان پیام‌رسان اطلاع داده می‌شود؛ «رد» تا زمانی که خودتان
+          تصمیم را عوض نکنید باقی می‌ماند.
         </p>
       </section>
 
@@ -353,7 +407,18 @@ export default async function AdminPage() {
                 </label>
 
                 <label className={styles.field}>
-                  <span className={styles.label}>شناسه عددی تلگرام</span>
+                  <span className={styles.label}>پیام‌رسان</span>
+                  <select name="channel" className={styles.select} defaultValue="telegram">
+                    {CHANNELS.map((channel) => (
+                      <option key={channel.id} value={channel.id}>
+                        {channel.label}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+
+                <label className={styles.field}>
+                  <span className={styles.label}>شناسه عددی</span>
                   <input
                     type="text"
                     name="externalId"
@@ -379,10 +444,10 @@ export default async function AdminPage() {
               </span>
               <p className={styles.hint}>
                 این فرم فقط برای کسانی است که هنوز با ربات تماس نگرفته‌اند و در
-                فهرست «درخواست‌های دسترسی» بالا دیده نمی‌شوند. شناسه عددی تلگرام
-                را می‌توانید از یک درخواست دسترسی کپی کنید، یا کاربر آن را از
-                ربات @userinfobot بگیرد. اگر شخص قبلاً در چت خصوصی /start زده
-                باشد، به‌جای این فرم از «تایید» همان درخواست استفاده کنید.
+                فهرست «درخواست‌های دسترسی» بالا دیده نمی‌شوند. پیام‌رسان و شناسه
+                عددی کاربر را مشخص کنید؛ شناسه را می‌توانید از یک درخواست دسترسی
+                کپی کنید. اگر شخص قبلاً در چت خصوصی /start زده باشد، به‌جای این
+                فرم از «تایید» همان درخواست استفاده کنید.
               </p>
               <div className={styles.checklist}>
                 {activeProjects.length === 0 ? (
@@ -403,19 +468,20 @@ export default async function AdminPage() {
         <div className={styles.tableWrap}>
           <table className={styles.table}>
             <thead>
-              <tr>
-                <th>نام</th>
-                <th>نقش</th>
-                <th>شناسه تلگرام</th>
-                <th>وضعیت</th>
-                <th>پروژه‌های مرتبط</th>
-                <th>عملیات</th>
-              </tr>
+                <tr>
+                  <th>نام</th>
+                  <th>پیام‌رسان</th>
+                  <th>نقش</th>
+                  <th>شناسه</th>
+                  <th>وضعیت</th>
+                  <th>پروژه‌های مرتبط</th>
+                  <th>عملیات</th>
+                </tr>
             </thead>
             <tbody>
               {viewUsers.length === 0 ? (
                 <tr>
-                  <td colSpan={6} className={styles.empty}>
+                  <td colSpan={7} className={styles.empty}>
                     هنوز کاربری ثبت نشده است.
                   </td>
                 </tr>
@@ -423,8 +489,9 @@ export default async function AdminPage() {
                 viewUsers.map((user) => (
                   <tr key={user.id}>
                     <td data-label="نام">{user.name}</td>
+                    <td data-label="پیام‌رسان">{user.channelLabel}</td>
                     <td data-label="نقش">{user.roleLabel}</td>
-                    <td data-label="شناسه تلگرام">
+                    <td data-label="شناسه">
                       <span className={styles.muted}>{user.externalId}</span>
                     </td>
                     <td data-label="وضعیت">
@@ -524,7 +591,7 @@ export default async function AdminPage() {
 
 /**
  * The approve form shared by the pending and rejected lists. The name is
- * prefilled with what Telegram reported, the admin can correct it, and the
+ * prefilled with what the network reported, the admin can correct it, and the
  * same server-side validation as the manual form runs on submit.
  */
 function ApproveForm({
@@ -553,7 +620,7 @@ function ApproveForm({
           className={styles.input}
         />
         <span className={styles.reference}>
-          روی تلگرام: {request.displayName}
+          روی {request.channelLabel}: {request.displayName}
           {request.username ? ` — @${request.username}` : ""}
         </span>
       </label>

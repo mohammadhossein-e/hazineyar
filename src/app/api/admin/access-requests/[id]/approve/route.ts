@@ -1,10 +1,13 @@
-import { approveAccessRequest } from "@/core/access/service";
+import {
+  approveAccessRequest,
+  getAccessRequestById,
+} from "@/core/access/service";
 import {
   accessRequestIdSchema,
   approveAccessRequestSchema,
 } from "@/core/access/schemas";
 import { presentUser } from "@/core/users/presenter";
-import { createTelegramNotifier } from "@/adapters/telegram/notifier";
+import { notifierForChannel } from "@/adapters/notifier";
 import { isSessionValid } from "@/lib/auth";
 import { jsonError, jsonOk, readJsonBody, toErrorResponse } from "@/lib/http";
 
@@ -34,16 +37,22 @@ export async function POST(request: Request, { params }: Context) {
     const requestId = accessRequestIdSchema.parse(id);
     const input = approveAccessRequestSchema.parse(await readJsonBody(request));
 
+    // The notice must go back over the network the request came from, so the
+    // request is read first to find its channel. A missing row is handled by
+    // `approveAccessRequest` (a 404); here it just means no notifier to route.
+    const existing = await getAccessRequestById(requestId);
+    const notifier = existing ? notifierForChannel(existing.channel) : null;
+
     const result = await approveAccessRequest(
       { id: requestId, ...input },
-      createTelegramNotifier(),
+      notifier,
     );
 
     const warnings: string[] = [];
     if (result.warning) warnings.push(result.warning);
     if (!result.notified) {
       warnings.push(
-        "کاربر ساخته شد، اما پیام اطلاع‌رسانی در تلگرام ارسال نشد (شاید کاربر ربات را بلاک کرده باشد).",
+        "کاربر ساخته شد، اما پیام اطلاع‌رسانی ارسال نشد (شاید کاربر ربات را بلاک کرده باشد).",
       );
     }
 

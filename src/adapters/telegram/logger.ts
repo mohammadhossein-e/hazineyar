@@ -1,27 +1,13 @@
+import { config } from "@/lib/config";
+import { createChannelLogger } from "../logger";
+
 /**
- * The adapter logs straight to the console — there is no logging dependency in
- * this project — but every line goes through here so the `[telegram]` prefix
- * and the timestamp stay identical across the adapter instead of each call
- * site inventing its own format.
+ * Telegram-flavoured logger. The implementation lives in the shared
+ * `createChannelLogger`; this module only fixes the prefix and the secrets so
+ * every existing `telegramLog/Warn/Error` import keeps working unchanged.
  */
-function write(
-  level: "log" | "warn" | "error",
-  message: string,
-  detail?: unknown,
-): void {
-  const line = `[telegram] ${new Date().toISOString()} ${message}`;
-  if (detail === undefined) console[level](line);
-  else console[level](line, detail);
-}
+const logger = createChannelLogger("telegram", config.secretTokens);
 
-export function telegramLog(message: string, detail?: unknown): void {
-  write("log", message, detail);
-}
-
-export function telegramWarn(message: string, detail?: unknown): void {
-  write("warn", message, detail);
-}
-
-export function telegramError(message: string, detail?: unknown): void {
-  write("error", message, detail);
-}
+export const telegramLog = logger.log;
+export const telegramWarn = logger.warn;
+export const telegramError = logger.error;

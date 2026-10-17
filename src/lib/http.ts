@@ -1,5 +1,7 @@
 import { ZodError } from "zod";
 import { DomainError } from "@/core/errors";
+import { config } from "./config";
+import { redactValue } from "./redact";
 
 /**
  * Every API route answers failures with this shape:
@@ -66,7 +68,7 @@ export function toErrorResponse(error: unknown): Response {
     return jsonError("بدنه درخواست JSON معتبر نیست", "INVALID_JSON", 400);
   }
 
-  console.error("[api] unhandled error:", error);
+  console.error("[api] unhandled error:", redactValue(error, config.secretTokens));
   return jsonError("خطای داخلی سرور", "INTERNAL_ERROR", 500);
 }
 

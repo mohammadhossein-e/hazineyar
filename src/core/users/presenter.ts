@@ -1,3 +1,5 @@
+import { channelLabel } from "../channels";
+
 export const ROLE_LABELS = {
   ADMIN: "ادمین",
   EMPLOYEE: "کارمند",
@@ -14,6 +16,7 @@ export type PresentedUser = {
   id: string;
   name: string;
   channel: string;
+  channelLabel: string;
   externalId: string;
   role: string;
   roleLabel: string;
@@ -36,6 +39,7 @@ export function presentUser(user: UserRow): PresentedUser {
     id: user.id,
     name: user.name,
     channel: user.channel,
+    channelLabel: channelLabel(user.channel),
     externalId: user.externalId,
     role: user.role,
     roleLabel: ROLE_LABELS[user.role] ?? user.role,

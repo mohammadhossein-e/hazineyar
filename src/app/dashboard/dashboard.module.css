@@ -695,6 +695,67 @@
   color: var(--muted-fg);
 }
 
+/* ------------------------------------------------------------ onboarding */
+
+/*
+ * The per-network "invite your staff" cards. A card is link text on one side,
+ * a QR code on the other; the whole thing has to survive being printed, so it
+ * stays a plain flex row with no hover-only affordances.
+ */
+.qrCards {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(18rem, 1fr));
+  gap: 0.75rem;
+}
+
+.qrCard {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 1rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  box-shadow: var(--shadow);
+}
+
+.qrCardBody {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  min-width: 0;
+}
+
+.qrCardTitle {
+  margin: 0;
+  font-size: 0.95rem;
+  font-weight: 700;
+}
+
+.qrLink {
+  display: block;
+  padding: 0.4rem 0.55rem;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  background: var(--surface-muted);
+  font-size: 0.78rem;
+  direction: ltr;
+  text-align: left;
+  /* A long deep link must wrap inside the card, never widen the page. */
+  overflow-wrap: anywhere;
+}
+
+.qrImage {
+  flex: 0 0 auto;
+  width: 160px;
+  height: 160px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: #fff;
+  padding: 0.35rem;
+}
+
 /* ------------------------------------------------------------ pagination */
 
 .pager {
@@ -885,11 +946,66 @@
   .accessForm {
     min-width: 0;
   }
+
+  .qrCards {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .qrCard {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .qrImage {
+    align-self: center;
+  }
 }
 
 @media (min-width: 768px) {
   .drawer,
   .drawerBackdrop {
     display: none;
+  }
+}
+
+/* ================================================================= print */
+
+/*
+ * "Print card" should print the onboarding card, not the dashboard. Everything
+ * is hidden with `visibility` (which keeps layout, so no reflow) and the card
+ * is revealed and pinned to the top-left of the page. The card's own heading
+ * and help text carry `noPrint` and are removed outright so the sheet is just
+ * the QR and its link.
+ */
+@media print {
+  body * {
+    visibility: hidden;
+  }
+
+  .noPrint {
+    display: none !important;
+  }
+
+  .printCard,
+  .printCard * {
+    visibility: visible;
+  }
+
+  .printCard {
+    position: absolute;
+    inset-block-start: 0;
+    inset-inline: 0;
+    padding: 0;
+    gap: 0.75rem;
+  }
+
+  .qrCard {
+    break-inside: avoid;
+    box-shadow: none;
+  }
+
+  .qrLink {
+    border-color: #999;
+    background: transparent;
   }
 }

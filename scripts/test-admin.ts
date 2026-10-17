@@ -264,7 +264,7 @@ async function main() {
     check(
       "duplicate is explained in Persian",
       typeof duplicate.json?.error?.message === "string" &&
-        duplicate.json.error.message.includes("شناسه تلگرام"),
+        duplicate.json.error.message.includes("از قبل ثبت شده"),
       duplicate.json,
     );
     check(

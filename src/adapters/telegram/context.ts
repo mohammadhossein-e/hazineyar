@@ -1,5 +1,3 @@
-import { Context } from "grammy";
-import type { ConversationFlavor } from "@grammyjs/conversations";
-
-/** Outside-context type: plain grammy context plus conversation controls. */
-export type Ctx = Context & ConversationFlavor<Context>;
+// The context type is identical across channels; the definition moved to the
+// shared adapter layer. This shim keeps the original import path working.
+export type { Ctx } from "../context";
